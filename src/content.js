@@ -21,7 +21,7 @@ const SELECTORS = {
   // TICKET REPLIES - Submit/Send button selectors
   REPLY_SUBMIT_BUTTONS: [
     // Zendesk Agent Workspace - Submit dropdown menu items only (not the dropdown trigger)
-    '[data-test-id^="submit_button-menu-"]',   // Submit dropdown menu items (Submit as Pending, etc.)
+    '[data-test-id^="submit_button-menu-"]:not([data-test-id="submit_button-menu-button"])',   // Submit dropdown menu items (Submit as Pending, etc.)
     // Other Zendesk submit buttons (fallbacks for different UI versions)
     '[data-test-id="submit-button"]',
     '[data-test-id="ticket-submit-button"]',
@@ -148,6 +148,132 @@ function shouldDebounce(eventType) {
 
   state.lastEventTime[eventType] = now;
   return false;
+}
+
+// ============================================================================
+// NETWORK INTERCEPTION - Track actual reply submissions
+// ============================================================================
+
+/**
+ * Check if API request is a reply submission and if it's public
+ */
+function isPublicReplyRequest(url, method, payload) {
+  // Zendesk API endpoints for comments/replies
+  const replyEndpoints = [
+    '/api/v2/tickets/',
+    '/api/v2/channels/voice/tickets/',
+    'api/lotus/tickets/',
+    'api/v2/any_channel/tickets/',
+  ];
+
+  // Check if URL matches reply endpoints
+  const isReplyEndpoint = replyEndpoints.some(endpoint => url.includes(endpoint)) &&
+                          (url.includes('/comments') || url.includes('/comment'));
+
+  if (!isReplyEndpoint || method !== 'POST') {
+    return null; // Not a reply submission
+  }
+
+  if (DEBUG_MODE) {
+    log('Reply API call detected:', { url, payload });
+  }
+
+  // Parse payload to check if it's public
+  try {
+    let data = payload;
+
+    // If payload is a string, try to parse it
+    if (typeof payload === 'string') {
+      data = JSON.parse(payload);
+    }
+
+    // Check various payload structures Zendesk uses
+    const comment = data?.comment || data?.ticket?.comment || data;
+
+    // If public field exists, use it directly
+    if (comment?.public !== undefined) {
+      return comment.public === true;
+    }
+
+    // Default to true if we can't determine (safer to track)
+    if (DEBUG_MODE) {
+      log('Could not determine public/private, defaulting to public', comment);
+    }
+    return true;
+  } catch (e) {
+    if (DEBUG_MODE) {
+      log('Error parsing reply payload:', e);
+    }
+    return true; // Default to tracking
+  }
+}
+
+/**
+ * Intercept fetch() calls
+ */
+function interceptFetch() {
+  const originalFetch = window.fetch;
+
+  window.fetch = function(...args) {
+    const [resource, config] = args;
+    const url = typeof resource === 'string' ? resource : resource.url;
+    const method = config?.method || 'GET';
+    const body = config?.body;
+
+    // Check if this is a public reply submission
+    const isPublic = isPublicReplyRequest(url, method.toUpperCase(), body);
+
+    // Call original fetch
+    const promise = originalFetch.apply(this, args);
+
+    // Track successful public replies
+    if (isPublic) {
+      promise.then(response => {
+        if (response.ok) {
+          log('Public reply sent via fetch');
+          trackMetric('reply');
+        }
+      }).catch(() => {
+        // Ignore errors (reply failed, don't track)
+      });
+    }
+
+    return promise;
+  };
+}
+
+/**
+ * Intercept XMLHttpRequest calls
+ */
+function interceptXHR() {
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    this._method = method;
+    this._url = url;
+    return originalOpen.apply(this, [method, url, ...rest]);
+  };
+
+  XMLHttpRequest.prototype.send = function(body) {
+    const method = this._method;
+    const url = this._url;
+
+    // Check if this is a public reply submission
+    const isPublic = isPublicReplyRequest(url, method, body);
+
+    if (isPublic) {
+      // Listen for successful completion
+      this.addEventListener('load', function() {
+        if (this.status >= 200 && this.status < 300) {
+          log('Public reply sent via XHR');
+          trackMetric('reply');
+        }
+      });
+    }
+
+    return originalSend.apply(this, arguments);
+  };
 }
 
 /**
@@ -398,38 +524,13 @@ function handleClick(event) {
       console.log('Element:', target);
 
       // Test each selector category
-      console.log('Matches REPLY_SUBMIT_BUTTONS:', matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS));
-      console.log('Matches REPLY_BUTTON_TEXT:', target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT));
-      console.log('Is Public Reply Mode:', isPublicReplyMode());
       console.log('Matches CHAT_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS));
       console.log('Matches CTI_CALL_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS));
       console.groupEnd();
     }
   }
 
-  // Check for Reply/Submit buttons
-  if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS)) {
-    log('Reply submit button clicked (selector match)');
-    // Only track if it's a PUBLIC reply (not internal note)
-    if (isPublicReplyMode()) {
-      setTimeout(() => trackMetric('reply'), 300);
-    } else {
-      log('Skipped tracking - internal note detected');
-    }
-    return;
-  }
-
-  // Check button text for replies
-  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT)) {
-    log('Reply submit button clicked (text match)');
-    // Only track if it's a PUBLIC reply (not internal note)
-    if (isPublicReplyMode()) {
-      setTimeout(() => trackMetric('reply'), 300);
-    } else {
-      log('Skipped tracking - internal note detected');
-    }
-    return;
-  }
+  // NOTE: Reply tracking is now done via network interception, not button clicks
 
   // Check for Chat End buttons
   if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
@@ -602,6 +703,11 @@ window.ZKT = {
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
+
+// Initialize network interception immediately (before DOM loads)
+interceptFetch();
+interceptXHR();
+log('Network interception enabled - tracking actual reply submissions');
 
 function init() {
   log('Initializing on:', window.location.href);
