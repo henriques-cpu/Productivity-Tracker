@@ -81,6 +81,12 @@ const SELECTORS = {
 };
 
 // ============================================================================
+// DEBUG MODE - Set to true to see all click events in console
+// ============================================================================
+
+const DEBUG_MODE = true;
+
+// ============================================================================
 // STATE
 // ============================================================================
 
@@ -268,11 +274,80 @@ function showNotification(metricType) {
 // ============================================================================
 
 /**
+ * Get debug info about an element for logging
+ */
+function getElementDebugInfo(element) {
+  if (!element) return 'null';
+
+  const info = {
+    tag: element.tagName?.toLowerCase(),
+    id: element.id || null,
+    classes: element.className || null,
+    type: element.getAttribute('type'),
+    'data-test-id': element.getAttribute('data-test-id'),
+    'aria-label': element.getAttribute('aria-label'),
+    text: (element.textContent || '').trim().substring(0, 50),
+  };
+
+  // Remove null values for cleaner output
+  Object.keys(info).forEach(key => {
+    if (info[key] === null || info[key] === '') delete info[key];
+  });
+
+  return info;
+}
+
+/**
+ * Find the nearest button/interactive element from click target
+ */
+function findInteractiveParent(element, maxDepth = 5) {
+  let current = element;
+  let depth = 0;
+
+  while (current && depth < maxDepth) {
+    if (current.tagName === 'BUTTON' ||
+        current.tagName === 'A' ||
+        current.getAttribute('role') === 'button' ||
+        current.getAttribute('data-test-id')) {
+      return current;
+    }
+    current = current.parentElement;
+    depth++;
+  }
+
+  return element;
+}
+
+/**
  * Handle click events for tracking
  */
 function handleClick(event) {
-  const target = event.target;
-  if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
+  const rawTarget = event.target;
+  if (!rawTarget || rawTarget.nodeType !== Node.ELEMENT_NODE) return;
+
+  // Find the actual interactive element (user might click on icon inside button)
+  const target = findInteractiveParent(rawTarget);
+
+  // DEBUG: Log every click on buttons/interactive elements
+  if (DEBUG_MODE) {
+    const isButton = target.tagName === 'BUTTON' ||
+                     target.getAttribute('role') === 'button' ||
+                     target.tagName === 'A';
+
+    if (isButton || target.getAttribute('data-test-id')) {
+      console.group('[ZKT DEBUG] Click detected');
+      console.log('Raw target:', getElementDebugInfo(rawTarget));
+      console.log('Interactive target:', getElementDebugInfo(target));
+      console.log('Element:', target);
+
+      // Test each selector category
+      console.log('Matches REPLY_SUBMIT_BUTTONS:', matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS));
+      console.log('Matches REPLY_BUTTON_TEXT:', target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT));
+      console.log('Matches CHAT_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS));
+      console.log('Matches CTI_CALL_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS));
+      console.groupEnd();
+    }
+  }
 
   // Check for Reply/Submit buttons
   if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS)) {
@@ -375,6 +450,88 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ============================================================================
+// DEBUG HELPERS (available in browser console)
+// ============================================================================
+
+/**
+ * Expose debug helpers on window for console access
+ * Usage in browser console:
+ *   ZKT.inspect()  - Then click an element to see its selectors
+ *   ZKT.test()     - Manually trigger a reply tracking
+ *   ZKT.selectors  - View current selectors
+ */
+window.ZKT = {
+  // View current selectors
+  selectors: SELECTORS,
+
+  // Test tracking manually
+  test: (type = 'reply') => {
+    trackMetric(type);
+    console.log(`[ZKT] Manually tracked: ${type}`);
+  },
+
+  // Start inspect mode - click any element to see its details
+  inspect: () => {
+    console.log('[ZKT] INSPECT MODE: Click any element to see its selector info...');
+    console.log('[ZKT] Click anywhere to exit inspect mode.');
+
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const el = e.target;
+      console.group('[ZKT INSPECT] Element clicked:');
+      console.log('Element:', el);
+      console.log('Tag:', el.tagName);
+      console.log('ID:', el.id || '(none)');
+      console.log('Classes:', el.className || '(none)');
+      console.log('data-test-id:', el.getAttribute('data-test-id') || '(none)');
+      console.log('aria-label:', el.getAttribute('aria-label') || '(none)');
+      console.log('type:', el.getAttribute('type') || '(none)');
+      console.log('Text:', (el.textContent || '').trim().substring(0, 100));
+
+      // Suggest selectors
+      console.log('\n--- Suggested selectors to add: ---');
+      if (el.getAttribute('data-test-id')) {
+        console.log(`  '[data-test-id="${el.getAttribute('data-test-id')}"]'`);
+      }
+      if (el.getAttribute('aria-label')) {
+        console.log(`  '[aria-label="${el.getAttribute('aria-label')}"]'`);
+      }
+      if (el.id) {
+        console.log(`  '#${el.id}'`);
+      }
+      if (el.className && typeof el.className === 'string') {
+        const firstClass = el.className.split(' ')[0];
+        if (firstClass && !firstClass.includes('_')) {
+          console.log(`  '.${firstClass}'`);
+        }
+      }
+      console.groupEnd();
+
+      // Remove handler after one click
+      document.removeEventListener('click', handler, true);
+      console.log('[ZKT] Inspect mode ended.');
+    };
+
+    document.addEventListener('click', handler, true);
+  },
+
+  // Show current storage data
+  storage: async () => {
+    const data = await chrome.storage.local.get(null);
+    console.log('[ZKT] Current storage:', data);
+    return data;
+  },
+
+  // Toggle debug mode
+  debug: (enabled) => {
+    window.ZKT_DEBUG = enabled;
+    console.log(`[ZKT] Debug mode: ${enabled ? 'ON' : 'OFF'}`);
+  }
+};
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -388,6 +545,7 @@ function init() {
   setupMutationObserver();
 
   log('Initialized successfully');
+  log('Debug helpers available: Type ZKT.inspect() in console to identify elements');
 }
 
 // Wait for document to be ready
