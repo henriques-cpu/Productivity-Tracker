@@ -37,6 +37,18 @@ const SELECTORS = {
     'footer[data-test-id] button[type="submit"]',
   ],
 
+  // Channel switcher to detect Public Reply vs Internal Note
+  CHANNEL_SWITCHER: '[data-test-id="omnichannel-channel-switcher-button"]',
+
+  // Aria labels that indicate a PUBLIC reply (not internal note)
+  PUBLIC_REPLY_INDICATORS: [
+    'Public reply',
+    'Email',
+    'Web',
+    'Chat',
+    'Messaging',
+  ],
+
   // Text patterns to match in buttons (case-insensitive)
   REPLY_BUTTON_TEXT: ['submit', 'send', 'submit as'],
 
@@ -159,6 +171,49 @@ function matchesAnySelector(element, selectors) {
 function matchesTextPattern(element, patterns) {
   const text = (element.textContent || '').toLowerCase().trim();
   return patterns.some((pattern) => text.includes(pattern.toLowerCase()));
+}
+
+/**
+ * Check if the composer is in "Public reply" mode (not internal note)
+ * Returns true if it's a public reply, false if it's an internal note
+ */
+function isPublicReplyMode() {
+  // Find the channel switcher button
+  const channelSwitcher = document.querySelector(SELECTORS.CHANNEL_SWITCHER);
+
+  if (!channelSwitcher) {
+    // If no channel switcher found, assume it's a reply (older Zendesk UI)
+    log('No channel switcher found, assuming public reply');
+    return true;
+  }
+
+  // Check the aria-label to determine the current mode
+  const ariaLabel = channelSwitcher.getAttribute('aria-label') || '';
+  const dataChannel = channelSwitcher.getAttribute('data-channel') || '';
+
+  if (DEBUG_MODE) {
+    log('Channel switcher found:', { ariaLabel, dataChannel });
+  }
+
+  // Check if it's internal note mode
+  if (ariaLabel.toLowerCase().includes('internal') || dataChannel === 'internal') {
+    log('Internal note mode detected - NOT tracking as reply');
+    return false;
+  }
+
+  // Check if it matches any public reply indicator
+  const isPublic = SELECTORS.PUBLIC_REPLY_INDICATORS.some(
+    indicator => ariaLabel.toLowerCase().includes(indicator.toLowerCase())
+  );
+
+  if (isPublic) {
+    log('Public reply mode detected');
+    return true;
+  }
+
+  // Default: if we can't determine, don't track (safer)
+  log('Could not determine reply mode, not tracking');
+  return false;
 }
 
 // ============================================================================
@@ -344,6 +399,7 @@ function handleClick(event) {
       // Test each selector category
       console.log('Matches REPLY_SUBMIT_BUTTONS:', matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS));
       console.log('Matches REPLY_BUTTON_TEXT:', target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT));
+      console.log('Is Public Reply Mode:', isPublicReplyMode());
       console.log('Matches CHAT_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS));
       console.log('Matches CTI_CALL_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS));
       console.groupEnd();
@@ -353,14 +409,24 @@ function handleClick(event) {
   // Check for Reply/Submit buttons
   if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS)) {
     log('Reply submit button clicked (selector match)');
-    setTimeout(() => trackMetric('reply'), 300);
+    // Only track if it's a PUBLIC reply (not internal note)
+    if (isPublicReplyMode()) {
+      setTimeout(() => trackMetric('reply'), 300);
+    } else {
+      log('Skipped tracking - internal note detected');
+    }
     return;
   }
 
   // Check button text for replies
   if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT)) {
     log('Reply submit button clicked (text match)');
-    setTimeout(() => trackMetric('reply'), 300);
+    // Only track if it's a PUBLIC reply (not internal note)
+    if (isPublicReplyMode()) {
+      setTimeout(() => trackMetric('reply'), 300);
+    } else {
+      log('Skipped tracking - internal note detected');
+    }
     return;
   }
 
