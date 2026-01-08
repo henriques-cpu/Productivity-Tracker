@@ -20,9 +20,9 @@
 const SELECTORS = {
   // TICKET REPLIES - Submit/Send button selectors
   REPLY_SUBMIT_BUTTONS: [
-    // Common Zendesk submit buttons
-    '[data-test-id="submit_button-button"]',  // Zendesk Agent Workspace (your instance)
+    // Zendesk Agent Workspace - Submit dropdown menu items only (not the dropdown trigger)
     '[data-test-id^="submit_button-menu"]',   // Submit dropdown menu items (Submit as Pending, etc.)
+    // Other Zendesk submit buttons (fallbacks for different UI versions)
     '[data-test-id="submit-button"]',
     '[data-test-id="ticket-submit-button"]',
     '[data-test-id="omni-button-submit"]',
