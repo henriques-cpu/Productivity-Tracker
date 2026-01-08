@@ -21,6 +21,7 @@ const SELECTORS = {
   // TICKET REPLIES - Submit/Send button selectors
   REPLY_SUBMIT_BUTTONS: [
     // Common Zendesk submit buttons
+    '[data-test-id="submit_button-button"]',  // Zendesk Agent Workspace (your instance)
     '[data-test-id="submit-button"]',
     '[data-test-id="ticket-submit-button"]',
     '[data-test-id="omni-button-submit"]',
