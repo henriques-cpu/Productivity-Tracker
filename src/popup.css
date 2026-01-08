@@ -1,0 +1,606 @@
+/**
+ * Zendesk KPI Tracker - Power BI Style Dashboard
+ * A modern, dark-themed dashboard inspired by Power BI
+ */
+
+/* ============================================
+   CSS Variables - Power BI Color Palette
+   ============================================ */
+:root {
+  /* Background Colors */
+  --bg-primary: #1b1b1b;
+  --bg-secondary: #252525;
+  --bg-card: #2d2d2d;
+  --bg-hover: #3d3d3d;
+
+  /* Text Colors */
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --text-muted: #6b6b6b;
+
+  /* Accent Colors */
+  --accent-blue: #5b9bd5;
+  --accent-green: #70ad47;
+  --accent-orange: #ed7d31;
+  --accent-purple: #7030a0;
+  --accent-yellow: #ffc000;
+
+  /* Metric Colors */
+  --color-replies: #5b9bd5;
+  --color-chats: #70ad47;
+  --color-inbound: #ed7d31;
+  --color-outbound: #7030a0;
+
+  /* Status Colors */
+  --status-success: #70ad47;
+  --status-warning: #ffc000;
+  --status-error: #c00000;
+
+  /* Borders & Shadows */
+  --border-color: #404040;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  width: 400px;
+  min-height: 500px;
+  overflow-x: hidden;
+}
+
+.container {
+  padding: var(--spacing-md);
+}
+
+/* ============================================
+   Header
+   ============================================ */
+.header {
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+  padding: var(--spacing-md);
+  margin: calc(var(--spacing-md) * -1);
+  margin-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--accent-blue);
+}
+
+.logo h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.date-display {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================
+   Status Bar
+   ============================================ */
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.connected .status-dot {
+  background: var(--status-success);
+}
+
+.status-indicator.disconnected .status-dot {
+  background: var(--status-error);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.settings-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+
+.settings-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.settings-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ============================================
+   Scorecards Grid
+   ============================================ */
+.scorecards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.scorecard {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  position: relative;
+  overflow: hidden;
+  transition: var(--transition-normal);
+  border: 1px solid var(--border-color);
+}
+
+.scorecard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+}
+
+.scorecard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.scorecard.replies::before { background: var(--color-replies); }
+.scorecard.chats::before { background: var(--color-chats); }
+.scorecard.inbound::before { background: var(--color-inbound); }
+.scorecard.outbound::before { background: var(--color-outbound); }
+
+.scorecard-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+}
+
+.scorecard-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.scorecard-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.scorecard.replies .scorecard-icon { color: var(--color-replies); }
+.scorecard.chats .scorecard-icon { color: var(--color-chats); }
+.scorecard.inbound .scorecard-icon { color: var(--color-inbound); }
+.scorecard.outbound .scorecard-icon { color: var(--color-outbound); }
+
+.scorecard-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scorecard-value {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: var(--spacing-xs);
+}
+
+.scorecard.replies .scorecard-value { color: var(--color-replies); }
+.scorecard.chats .scorecard-value { color: var(--color-chats); }
+.scorecard.inbound .scorecard-value { color: var(--color-inbound); }
+.scorecard.outbound .scorecard-value { color: var(--color-outbound); }
+
+.scorecard-goal {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-sm);
+}
+
+.scorecard-progress {
+  margin-top: auto;
+}
+
+.progress-bar {
+  height: 4px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width var(--transition-normal);
+}
+
+.scorecard.replies .progress-fill { background: var(--color-replies); }
+.scorecard.chats .progress-fill { background: var(--color-chats); }
+.scorecard.inbound .progress-fill { background: var(--color-inbound); }
+.scorecard.outbound .progress-fill { background: var(--color-outbound); }
+
+/* ============================================
+   Manual Tracking Section
+   ============================================ */
+.manual-section {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  border: 1px solid var(--border-color);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.section-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-md);
+}
+
+.manual-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.manual-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: var(--transition-fast);
+}
+
+.manual-btn .btn-icon {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.manual-btn.replies {
+  background: rgba(91, 155, 213, 0.2);
+  border: 1px solid var(--color-replies);
+}
+.manual-btn.replies:hover {
+  background: rgba(91, 155, 213, 0.3);
+}
+
+.manual-btn.chats {
+  background: rgba(112, 173, 71, 0.2);
+  border: 1px solid var(--color-chats);
+}
+.manual-btn.chats:hover {
+  background: rgba(112, 173, 71, 0.3);
+}
+
+.manual-btn.inbound {
+  background: rgba(237, 125, 49, 0.2);
+  border: 1px solid var(--color-inbound);
+}
+.manual-btn.inbound:hover {
+  background: rgba(237, 125, 49, 0.3);
+}
+
+.manual-btn.outbound {
+  background: rgba(112, 48, 160, 0.2);
+  border: 1px solid var(--color-outbound);
+}
+.manual-btn.outbound:hover {
+  background: rgba(112, 48, 160, 0.3);
+}
+
+.manual-btn:active {
+  transform: scale(0.95);
+}
+
+/* ============================================
+   Chart Section
+   ============================================ */
+.chart-section {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  border: 1px solid var(--border-color);
+}
+
+.chart-container {
+  height: 180px;
+  position: relative;
+}
+
+/* ============================================
+   Export Section
+   ============================================ */
+.export-section {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.export-btn,
+.reset-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition-fast);
+}
+
+.export-btn svg,
+.reset-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.export-btn {
+  background: linear-gradient(135deg, var(--status-success) 0%, #5a9a3d 100%);
+  color: white;
+}
+
+.export-btn:hover {
+  background: linear-gradient(135deg, #5a9a3d 0%, var(--status-success) 100%);
+  transform: translateY(-1px);
+}
+
+.reset-btn {
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.reset-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.export-btn:active,
+.reset-btn:active {
+  transform: scale(0.98);
+}
+
+/* ============================================
+   Modal Styles
+   ============================================ */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.active {
+  display: flex;
+}
+
+.modal-content {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 360px;
+  max-height: 90%;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-hover);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: var(--transition-fast);
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: var(--spacing-md);
+}
+
+.modal-body h3 {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-md);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.setting-item label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.setting-item input {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  width: 100%;
+}
+
+.setting-item input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.save-settings-btn {
+  width: 100%;
+  padding: var(--spacing-md);
+  background: var(--accent-blue);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.save-settings-btn:hover {
+  background: #4a8bc4;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+@keyframes countUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.scorecard-value.updated {
+  animation: countUp 0.3s ease-out;
+}
+
+/* ============================================
+   Scrollbar Styles
+   ============================================ */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
