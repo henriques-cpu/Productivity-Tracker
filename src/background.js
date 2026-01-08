@@ -1,11 +1,9 @@
 /**
  * Zendesk KPI Tracker - Background Service Worker
  *
- * Handles:
- * - Data persistence using Chrome Storage API
- * - Message routing between content script and popup
- * - Daily data reset and history archival
- * - Metric aggregation
+ * Handles message routing, context menus, and badge updates.
+ * Note: Main data persistence is handled directly by popup.js and content.js
+ * using chrome.storage.local for reliability.
  */
 
 // ============================================================================
@@ -19,24 +17,14 @@ const DEFAULT_GOALS = {
   outbound: 5,
 };
 
-// Maximum history entries to keep (days)
-const MAX_HISTORY_DAYS = 90;
-
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
-/**
- * Get today's date as YYYY-MM-DD string
- */
 function getTodayDateString() {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
 }
 
-/**
- * Create empty metrics object for today
- */
 function createEmptyMetrics() {
   return {
     date: getTodayDateString(),
@@ -45,7 +33,6 @@ function createEmptyMetrics() {
     inbound: 0,
     outbound: 0,
     lastUpdated: Date.now(),
-    events: [], // Store individual events for debugging
   };
 }
 
@@ -53,300 +40,180 @@ function createEmptyMetrics() {
 // STORAGE FUNCTIONS
 // ============================================================================
 
-/**
- * Get current metrics from storage
- */
 async function getMetrics() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['metrics'], (result) => {
-      resolve(result.metrics || createEmptyMetrics());
+      let metrics = result.metrics || createEmptyMetrics();
+
+      // Check for new day
+      if (metrics.date !== getTodayDateString()) {
+        // Archive and reset
+        archiveMetrics(metrics);
+        metrics = createEmptyMetrics();
+        chrome.storage.local.set({ metrics });
+      }
+
+      resolve(metrics);
     });
   });
 }
 
-/**
- * Save metrics to storage
- */
 async function saveMetrics(metrics) {
+  metrics.lastUpdated = Date.now();
   return new Promise((resolve) => {
-    chrome.storage.local.set({ metrics }, resolve);
+    chrome.storage.local.set({ metrics }, () => {
+      updateBadge(metrics);
+      resolve();
+    });
   });
 }
 
-/**
- * Get history from storage
- */
-async function getHistory() {
+async function archiveMetrics(oldMetrics) {
+  if (!oldMetrics.date) return;
+
   return new Promise((resolve) => {
     chrome.storage.local.get(['history'], (result) => {
-      resolve(result.history || []);
+      const history = result.history || [];
+
+      // Don't duplicate
+      if (!history.some((h) => h.date === oldMetrics.date)) {
+        history.push({
+          date: oldMetrics.date,
+          reply: oldMetrics.reply || 0,
+          chat: oldMetrics.chat || 0,
+          inbound: oldMetrics.inbound || 0,
+          outbound: oldMetrics.outbound || 0,
+        });
+      }
+
+      // Keep last 90 days
+      chrome.storage.local.set({ history: history.slice(-90) }, resolve);
     });
   });
-}
-
-/**
- * Save history to storage
- */
-async function saveHistory(history) {
-  // Limit history size
-  const limitedHistory = history.slice(-MAX_HISTORY_DAYS);
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ history: limitedHistory }, resolve);
-  });
-}
-
-/**
- * Archive current day's metrics to history
- */
-async function archiveToHistory(metrics) {
-  const history = await getHistory();
-
-  // Check if this date already exists in history
-  const existingIndex = history.findIndex((h) => h.date === metrics.date);
-
-  if (existingIndex >= 0) {
-    // Update existing entry
-    history[existingIndex] = {
-      date: metrics.date,
-      reply: metrics.reply,
-      chat: metrics.chat,
-      inbound: metrics.inbound,
-      outbound: metrics.outbound,
-    };
-  } else {
-    // Add new entry
-    history.push({
-      date: metrics.date,
-      reply: metrics.reply,
-      chat: metrics.chat,
-      inbound: metrics.inbound,
-      outbound: metrics.outbound,
-    });
-  }
-
-  await saveHistory(history);
 }
 
 // ============================================================================
 // METRIC TRACKING
 // ============================================================================
 
-/**
- * Increment a metric counter
- */
-async function trackMetric(metricType, eventData = {}) {
-  const today = getTodayDateString();
-  let metrics = await getMetrics();
-
-  // Check if we need to start a new day
-  if (metrics.date !== today) {
-    // Archive yesterday's data
-    await archiveToHistory(metrics);
-    // Create new metrics for today
-    metrics = createEmptyMetrics();
-  }
-
-  // Validate metric type
-  const validMetrics = ['reply', 'chat', 'inbound', 'outbound'];
-  if (!validMetrics.includes(metricType)) {
-    console.error('[Zendesk KPI Tracker] Invalid metric type:', metricType);
-    return { success: false, error: 'Invalid metric type' };
-  }
-
-  // Increment the counter
-  metrics[metricType] = (metrics[metricType] || 0) + 1;
-  metrics.lastUpdated = Date.now();
-
-  // Store event for debugging (keep last 100 events)
-  metrics.events = metrics.events || [];
-  metrics.events.push({
-    type: metricType,
-    timestamp: Date.now(),
-    url: eventData.url || '',
-    manual: eventData.manual || false,
-  });
-  if (metrics.events.length > 100) {
-    metrics.events = metrics.events.slice(-100);
-  }
-
-  // Save to storage
-  await saveMetrics(metrics);
-
-  console.log(`[Zendesk KPI Tracker] Tracked ${metricType}:`, metrics[metricType]);
-
-  return {
-    success: true,
-    metrics: {
-      reply: metrics.reply,
-      chat: metrics.chat,
-      inbound: metrics.inbound,
-      outbound: metrics.outbound,
-    },
-  };
-}
-
-/**
- * Check for new day and reset if needed
- */
-async function checkNewDay() {
-  const today = getTodayDateString();
+async function trackMetric(metricType) {
   const metrics = await getMetrics();
 
-  if (metrics.date !== today) {
-    // Archive yesterday's data
-    await archiveToHistory(metrics);
-    // Create new metrics for today
-    await saveMetrics(createEmptyMetrics());
-    return { newDay: true };
+  if (metrics[metricType] !== undefined) {
+    metrics[metricType]++;
+    await saveMetrics(metrics);
+    console.log(`[ZKT Background] Tracked ${metricType}:`, metrics[metricType]);
+    return { success: true, metrics };
   }
 
-  return { newDay: false };
+  return { success: false, error: 'Invalid metric type' };
 }
 
-/**
- * Reset today's metrics
- */
-async function resetToday() {
-  await saveMetrics(createEmptyMetrics());
-  return { success: true };
+// ============================================================================
+// BADGE UPDATE
+// ============================================================================
+
+function updateBadge(metrics) {
+  if (!metrics) {
+    chrome.action.setBadgeText({ text: '' });
+    return;
+  }
+
+  const total = (metrics.reply || 0) + (metrics.chat || 0) +
+                (metrics.inbound || 0) + (metrics.outbound || 0);
+
+  if (total > 0) {
+    chrome.action.setBadgeText({ text: total.toString() });
+    chrome.action.setBadgeBackgroundColor({ color: '#70ad47' });
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+  }
 }
 
 // ============================================================================
 // MESSAGE HANDLING
 // ============================================================================
 
-/**
- * Handle messages from content script and popup
- */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Zendesk KPI Tracker] Received message:', message.type);
+  console.log('[ZKT Background] Message received:', message.type);
 
-  switch (message.type) {
-    case 'TRACK_METRIC':
-      trackMetric(message.metric, {
-        url: message.url,
-        manual: message.manual,
-        timestamp: message.timestamp,
-      }).then(sendResponse);
-      return true; // Keep channel open for async response
+  (async () => {
+    try {
+      switch (message.type) {
+        case 'TRACK_METRIC': {
+          const result = await trackMetric(message.metric);
+          sendResponse(result);
+          break;
+        }
 
-    case 'GET_METRICS':
-      getMetrics().then((metrics) => {
-        sendResponse({ success: true, metrics });
-      });
-      return true;
+        case 'GET_METRICS': {
+          const metrics = await getMetrics();
+          sendResponse({ success: true, metrics });
+          break;
+        }
 
-    case 'NEW_DAY_CHECK':
-      checkNewDay().then(sendResponse);
-      return true;
+        case 'RESET_TODAY': {
+          const newMetrics = createEmptyMetrics();
+          await saveMetrics(newMetrics);
+          sendResponse({ success: true, metrics: newMetrics });
+          break;
+        }
 
-    case 'RESET_TODAY':
-      resetToday().then(sendResponse);
-      return true;
+        case 'NEW_DAY_CHECK': {
+          const metrics = await getMetrics();
+          sendResponse({ success: true, metrics });
+          break;
+        }
 
-    case 'GET_HISTORY':
-      getHistory().then((history) => {
-        sendResponse({ success: true, history });
-      });
-      return true;
+        default:
+          sendResponse({ success: false, error: 'Unknown message type' });
+      }
+    } catch (error) {
+      console.error('[ZKT Background] Error:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+  })();
 
-    default:
-      sendResponse({ success: false, error: 'Unknown message type' });
-      return false;
-  }
+  return true; // Keep channel open for async response
 });
 
 // ============================================================================
-// ALARM SETUP (Daily Reset Check)
+// CONTEXT MENU
 // ============================================================================
 
-/**
- * Set up daily alarm to check for day change
- */
-chrome.alarms.create('dailyReset', {
-  periodInMinutes: 60, // Check every hour
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'dailyReset') {
-    checkNewDay();
-  }
-});
-
-// ============================================================================
-// INSTALLATION & UPDATE HANDLERS
-// ============================================================================
-
-/**
- * Handle extension installation
- */
-chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('[Zendesk KPI Tracker] Extension installed/updated:', details.reason);
-
-  if (details.reason === 'install') {
-    // Initialize storage with default values
-    const metrics = createEmptyMetrics();
-    await saveMetrics(metrics);
-    await saveHistory([]);
-
-    // Set default goals
-    chrome.storage.local.set({ goals: DEFAULT_GOALS });
-
-    console.log('[Zendesk KPI Tracker] Initialized with default values');
-  }
-
-  if (details.reason === 'update') {
-    // Perform any necessary migrations
-    console.log('[Zendesk KPI Tracker] Extension updated from', details.previousVersion);
-  }
-});
-
-/**
- * Handle extension startup
- */
-chrome.runtime.onStartup.addListener(() => {
-  console.log('[Zendesk KPI Tracker] Extension started');
-  checkNewDay();
-});
-
-// ============================================================================
-// CONTEXT MENU (Optional - for quick tracking)
-// ============================================================================
-
-/**
- * Create context menu items for quick tracking
- */
-chrome.runtime.onInstalled.addListener(() => {
-  // Create parent menu
-  chrome.contextMenus.create({
-    id: 'zkt-parent',
-    title: 'Zendesk KPI Tracker',
-    contexts: ['page'],
-    documentUrlPatterns: ['*://*.zendesk.com/*'],
-  });
-
-  // Create sub-menu items
-  const menuItems = [
-    { id: 'zkt-reply', title: 'Track Reply' },
-    { id: 'zkt-chat', title: 'Track Chat' },
-    { id: 'zkt-inbound', title: 'Track Inbound Call' },
-    { id: 'zkt-outbound', title: 'Track Outbound Call' },
-  ];
-
-  menuItems.forEach((item) => {
+function setupContextMenu() {
+  // Remove existing menus first
+  chrome.contextMenus.removeAll(() => {
+    // Create parent menu
     chrome.contextMenus.create({
-      id: item.id,
-      parentId: 'zkt-parent',
-      title: item.title,
+      id: 'zkt-parent',
+      title: 'Track Metric',
       contexts: ['page'],
       documentUrlPatterns: ['*://*.zendesk.com/*'],
     });
-  });
-});
 
-/**
- * Handle context menu clicks
- */
+    // Create sub-menu items
+    const items = [
+      { id: 'zkt-reply', title: '+ Reply Sent' },
+      { id: 'zkt-chat', title: '+ Chat Completed' },
+      { id: 'zkt-inbound', title: '+ Inbound Call' },
+      { id: 'zkt-outbound', title: '+ Outbound Call' },
+    ];
+
+    items.forEach((item) => {
+      chrome.contextMenus.create({
+        id: item.id,
+        parentId: 'zkt-parent',
+        title: item.title,
+        contexts: ['page'],
+        documentUrlPatterns: ['*://*.zendesk.com/*'],
+      });
+    });
+
+    console.log('[ZKT Background] Context menu created');
+  });
+}
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const metricMap = {
     'zkt-reply': 'reply',
@@ -357,37 +224,53 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   const metric = metricMap[info.menuItemId];
   if (metric) {
-    trackMetric(metric, { url: tab.url, manual: true });
+    trackMetric(metric);
   }
 });
 
 // ============================================================================
-// BADGE UPDATE
+// INSTALLATION HANDLERS
 // ============================================================================
 
-/**
- * Update extension badge with total interactions
- */
-async function updateBadge() {
-  const metrics = await getMetrics();
-  const total = metrics.reply + metrics.chat + metrics.inbound + metrics.outbound;
+chrome.runtime.onInstalled.addListener((details) => {
+  console.log('[ZKT Background] Installed:', details.reason);
 
-  if (total > 0) {
-    chrome.action.setBadgeText({ text: total.toString() });
-    chrome.action.setBadgeBackgroundColor({ color: '#70ad47' });
-  } else {
-    chrome.action.setBadgeText({ text: '' });
+  // Initialize storage on first install
+  if (details.reason === 'install') {
+    chrome.storage.local.set({
+      metrics: createEmptyMetrics(),
+      goals: DEFAULT_GOALS,
+      history: [],
+    });
   }
-}
+
+  // Setup context menu
+  setupContextMenu();
+});
+
+// ============================================================================
+// STARTUP
+// ============================================================================
+
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[ZKT Background] Startup');
+
+  // Check for new day and update badge
+  const metrics = await getMetrics();
+  updateBadge(metrics);
+
+  // Ensure context menu exists
+  setupContextMenu();
+});
 
 // Listen for storage changes to update badge
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.metrics) {
-    updateBadge();
+    updateBadge(changes.metrics.newValue);
   }
 });
 
-// Update badge on startup
-updateBadge();
+// Initialize badge on load
+getMetrics().then(updateBadge);
 
-console.log('[Zendesk KPI Tracker] Background service worker initialized');
+console.log('[ZKT Background] Service worker loaded');
