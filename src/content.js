@@ -1,8 +1,7 @@
 /**
  * Zendesk KPI Tracker - Content Script
  *
- * This script injects into Zendesk pages and tracks user interactions
- * using DOM observation and event listeners.
+ * Injects into Zendesk pages and tracks user interactions.
  *
  * IMPORTANT: Zendesk uses dynamic CSS classes that may change.
  * Update the SELECTORS object below if tracking stops working.
@@ -10,7 +9,7 @@
  * How to find selectors:
  * 1. Right-click the element in Zendesk
  * 2. Click "Inspect"
- * 3. Copy the class name or data attribute
+ * 3. Copy the class name, data attribute, or aria-label
  * 4. Update the corresponding selector below
  */
 
@@ -20,255 +19,194 @@
 
 const SELECTORS = {
   // TICKET REPLIES - Submit/Send button selectors
-  // Try multiple selectors as Zendesk may use different elements
   REPLY_SUBMIT_BUTTONS: [
+    // Common Zendesk submit buttons
     '[data-test-id="submit-button"]',
     '[data-test-id="ticket-submit-button"]',
-    'button[data-garden-id="buttons.button"][type="submit"]',
-    '.composer button[type="submit"]',
-    '[aria-label="Submit"]',
-    '[aria-label="Send"]',
-    'button:contains("Submit")',
-    'footer button[data-garden-id*="button"]',
     '[data-test-id="omni-button-submit"]',
-    '.ticket-resolution-footer button',
-    // Workspace/Agent Workspace selectors
-    '[data-test-id="pane-footer"] button[type="submit"]',
     '[data-test-id="composer-submit-button"]',
-    'button[data-test-id*="submit"]',
+    '[data-test-id="pane-footer"] button[type="submit"]',
+    // Generic button selectors
+    'button[type="submit"]',
+    '[aria-label="Submit"]',
+    '[aria-label="Submit as"]',
+    '[aria-label="Send"]',
+    // Agent Workspace
+    '.ticket-resolution-footer button[type="submit"]',
+    'footer[data-test-id] button[type="submit"]',
   ],
 
-  // CHAT INTERACTIONS - End chat button and chat ended indicators
+  // Text patterns to match in buttons (case-insensitive)
+  REPLY_BUTTON_TEXT: ['submit', 'send', 'submit as'],
+
+  // CHAT - End chat buttons and indicators
   CHAT_END_BUTTONS: [
     '[data-test-id="end-chat-button"]',
+    '[data-test-id="chat-end"]',
     '[aria-label="End chat"]',
     '[aria-label="End Chat"]',
     'button[title="End chat"]',
-    '.chat-end-btn',
-    '[data-test-id="chat-end"]',
-    // Zendesk Chat widget selectors
-    '.zd-chat-end',
     '[data-action="end-chat"]',
   ],
 
-  CHAT_ENDED_INDICATORS: [
-    '[data-test-id="chat-ended"]',
-    '.chat-ended-message',
-    '.chat-status-ended',
-    '[data-chat-status="ended"]',
-    // Text content patterns (checked separately)
+  CHAT_END_TEXT: ['end chat', 'end conversation', 'close chat'],
+
+  // CALLS - CTI/Talk indicators
+  CTI_CALL_END_BUTTONS: [
+    '[data-test-id="end-call-button"]',
+    '[data-test-id="hangup-button"]',
+    '[aria-label="End call"]',
+    '[aria-label="Hang up"]',
+    '[data-test-id="talk-hangup"]',
   ],
 
-  CHAT_ENDED_TEXT_PATTERNS: [
-    'Chat ended',
-    'Chat has ended',
-    'Conversation ended',
-    'Session ended',
-  ],
+  CTI_CALL_END_TEXT: ['end call', 'hang up', 'hangup'],
 
-  // CALL TRACKING - CTI bar selectors
-  CTI_CALL_ENDED_INDICATORS: [
-    '[data-test-id="call-ended"]',
-    '[data-test-id="cti-call-ended"]',
-    '.cti-call-ended',
-    '[data-call-status="ended"]',
-    '[aria-label="Call ended"]',
-    // Talk/CTI specific selectors
-    '.talk-call-ended',
-    '[data-test-id="talk-status-idle"]',
-    '.cti-status-idle',
-  ],
-
+  // Inbound call indicators (when call starts)
   CTI_INBOUND_INDICATORS: [
     '[data-test-id="incoming-call"]',
     '[data-call-direction="inbound"]',
-    '[data-test-id="cti-incoming"]',
-    '.cti-incoming-call',
     '[aria-label*="incoming"]',
     '[aria-label*="Incoming"]',
-    '.talk-incoming',
   ],
 
-  CTI_OUTBOUND_INDICATORS: [
-    '[data-test-id="outgoing-call"]',
-    '[data-call-direction="outbound"]',
-    '[data-test-id="cti-outgoing"]',
-    '.cti-outgoing-call',
-    '[aria-label*="outgoing"]',
-    '[aria-label*="Outgoing"]',
-    '.talk-outgoing',
-    // Dial pad interaction
+  // Outbound call indicators (dial button)
+  CTI_OUTBOUND_TRIGGERS: [
     '[data-test-id="dial-button"]',
+    '[data-test-id="make-call"]',
     '[aria-label="Dial"]',
-  ],
-
-  CTI_ACTIVE_CALL_INDICATORS: [
-    '[data-test-id="active-call"]',
-    '[data-call-status="active"]',
-    '.cti-call-active',
-    '.talk-call-active',
-    '[data-test-id="cti-connected"]',
-  ],
-
-  // CONTAINER ELEMENTS - For MutationObserver targets
-  MAIN_CONTENT_CONTAINERS: [
-    '#main',
-    '[role="main"]',
-    '.main-pane',
-    '#ember-application',
-    '.workspace',
-    '[data-test-id="workspace"]',
-    'body', // Fallback
+    '[aria-label="Make call"]',
+    '[aria-label="Call"]',
   ],
 };
 
 // ============================================================================
-// STATE TRACKING
+// STATE
 // ============================================================================
 
 const state = {
-  lastCallDirection: null, // 'inbound' or 'outbound'
+  lastCallDirection: null,
   isCallActive: false,
-  processedEvents: new Set(), // Prevent duplicate counting
-  observers: [],
-  debugMode: true, // Set to false in production
+  lastEventTime: {},
+  debounceMs: 2000, // Prevent double-counting within 2 seconds
 };
 
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
-/**
- * Log debug messages (only when debugMode is enabled)
- */
-function debugLog(...args) {
-  if (state.debugMode) {
-    console.log('[Zendesk KPI Tracker]', ...args);
-  }
+function log(...args) {
+  console.log('[ZKT Content]', ...args);
+}
+
+function getTodayDateString() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function createEmptyMetrics() {
+  return {
+    date: getTodayDateString(),
+    reply: 0,
+    chat: 0,
+    inbound: 0,
+    outbound: 0,
+    lastUpdated: Date.now(),
+  };
 }
 
 /**
- * Generate a unique event ID to prevent duplicate counting
+ * Check if event should be debounced (prevent double-counting)
  */
-function generateEventId(type) {
-  return `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-/**
- * Check if an event was already processed (within last 2 seconds)
- */
-function isDuplicateEvent(type) {
+function shouldDebounce(eventType) {
   const now = Date.now();
-  const recentKey = `${type}-recent`;
+  const lastTime = state.lastEventTime[eventType] || 0;
 
-  // Clean old entries
-  state.processedEvents.forEach((value) => {
-    if (value < now - 2000) {
-      state.processedEvents.delete(value);
-    }
-  });
-
-  const lastEventTime = Array.from(state.processedEvents)
-    .filter(key => key.toString().startsWith(type))
-    .pop();
-
-  if (lastEventTime && now - lastEventTime < 2000) {
-    debugLog(`Duplicate event prevented: ${type}`);
+  if (now - lastTime < state.debounceMs) {
+    log(`Debounced ${eventType} (too soon after last event)`);
     return true;
   }
 
-  state.processedEvents.add(`${type}-${now}`);
+  state.lastEventTime[eventType] = now;
   return false;
 }
 
 /**
- * Find first matching element from a list of selectors
+ * Check if element matches any selector in list
  */
-function findElement(selectors) {
+function matchesAnySelector(element, selectors) {
   for (const selector of selectors) {
     try {
-      const element = document.querySelector(selector);
-      if (element) {
-        debugLog(`Found element with selector: ${selector}`);
-        return element;
+      if (element.matches(selector) || element.closest(selector)) {
+        return true;
       }
     } catch (e) {
       // Invalid selector, skip
     }
   }
-  return null;
-}
-
-/**
- * Find all matching elements from a list of selectors
- */
-function findAllElements(selectors) {
-  const elements = new Set();
-  for (const selector of selectors) {
-    try {
-      const found = document.querySelectorAll(selector);
-      found.forEach(el => elements.add(el));
-    } catch (e) {
-      // Invalid selector, skip
-    }
-  }
-  return Array.from(elements);
-}
-
-/**
- * Check if any element contains specific text patterns
- */
-function checkForTextPatterns(patterns) {
-  for (const pattern of patterns) {
-    const xpath = `//*[contains(text(), '${pattern}')]`;
-    const result = document.evaluate(
-      xpath,
-      document,
-      null,
-      XPathResult.FIRST_ORDERED_NODE_TYPE,
-      null
-    );
-    if (result.singleNodeValue) {
-      debugLog(`Found text pattern: ${pattern}`);
-      return true;
-    }
-  }
   return false;
 }
 
-// ============================================================================
-// METRIC TRACKING FUNCTIONS
-// ============================================================================
-
 /**
- * Send metric update to background script
+ * Check if element text matches any pattern
  */
-function trackMetric(metricType) {
-  if (isDuplicateEvent(metricType)) {
-    return;
-  }
-
-  debugLog(`Tracking metric: ${metricType}`);
-
-  chrome.runtime.sendMessage({
-    type: 'TRACK_METRIC',
-    metric: metricType,
-    timestamp: Date.now(),
-    url: window.location.href,
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      debugLog('Error sending metric:', chrome.runtime.lastError);
-    } else {
-      debugLog('Metric tracked successfully:', response);
-      showTrackingNotification(metricType);
-    }
-  });
+function matchesTextPattern(element, patterns) {
+  const text = (element.textContent || '').toLowerCase().trim();
+  return patterns.some((pattern) => text.includes(pattern.toLowerCase()));
 }
 
-/**
- * Show a brief notification when a metric is tracked
- */
-function showTrackingNotification(metricType) {
+// ============================================================================
+// STORAGE FUNCTIONS (Direct storage access for reliability)
+// ============================================================================
+
+async function trackMetric(metricType) {
+  if (shouldDebounce(metricType)) return;
+
+  log(`Tracking: ${metricType}`);
+
+  try {
+    // Get current metrics from storage
+    const result = await chrome.storage.local.get(['metrics']);
+    let metrics = result.metrics || createEmptyMetrics();
+
+    // Check for new day
+    if (metrics.date !== getTodayDateString()) {
+      // Archive old metrics
+      const historyResult = await chrome.storage.local.get(['history']);
+      const history = historyResult.history || [];
+
+      if (metrics.date) {
+        history.push({
+          date: metrics.date,
+          reply: metrics.reply || 0,
+          chat: metrics.chat || 0,
+          inbound: metrics.inbound || 0,
+          outbound: metrics.outbound || 0,
+        });
+        await chrome.storage.local.set({ history: history.slice(-90) });
+      }
+
+      metrics = createEmptyMetrics();
+    }
+
+    // Increment the metric
+    if (metrics[metricType] !== undefined) {
+      metrics[metricType]++;
+      metrics.lastUpdated = Date.now();
+      await chrome.storage.local.set({ metrics });
+
+      log(`Tracked ${metricType}:`, metrics[metricType]);
+      showNotification(metricType);
+    }
+  } catch (error) {
+    log('Error tracking metric:', error);
+  }
+}
+
+// ============================================================================
+// NOTIFICATION
+// ============================================================================
+
+function showNotification(metricType) {
   const labels = {
     reply: 'Reply Sent',
     chat: 'Chat Completed',
@@ -276,360 +214,164 @@ function showTrackingNotification(metricType) {
     outbound: 'Outbound Call',
   };
 
+  // Create notification element
   const notification = document.createElement('div');
-  notification.className = 'zkt-notification';
+  notification.id = 'zkt-notification';
   notification.innerHTML = `
-    <div class="zkt-notification-content">
-      <span class="zkt-notification-icon">✓</span>
-      <span class="zkt-notification-text">${labels[metricType] || metricType} tracked!</span>
+    <div style="
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: zkt-slide-in 0.3s ease-out;
+    ">
+      <span style="font-size: 16px;">✓</span>
+      <span>${labels[metricType] || metricType} tracked!</span>
     </div>
   `;
 
-  // Add styles if not already present
-  if (!document.getElementById('zkt-notification-styles')) {
+  // Add animation styles if not present
+  if (!document.getElementById('zkt-styles')) {
     const styles = document.createElement('style');
-    styles.id = 'zkt-notification-styles';
+    styles.id = 'zkt-styles';
     styles.textContent = `
-      .zkt-notification {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 999999;
-        animation: zkt-slide-in 0.3s ease-out, zkt-fade-out 0.3s ease-in 2s forwards;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 14px;
-      }
-      .zkt-notification-content {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .zkt-notification-icon {
-        font-size: 16px;
-        font-weight: bold;
-      }
       @keyframes zkt-slide-in {
         from { transform: translateX(100%); opacity: 0; }
         to { transform: translateX(0); opacity: 1; }
-      }
-      @keyframes zkt-fade-out {
-        from { opacity: 1; }
-        to { opacity: 0; }
       }
     `;
     document.head.appendChild(styles);
   }
 
+  // Remove existing notification
+  document.getElementById('zkt-notification')?.remove();
+
+  // Add new notification
   document.body.appendChild(notification);
 
-  // Remove after animation
-  setTimeout(() => {
-    notification.remove();
-  }, 2500);
+  // Remove after 2.5 seconds
+  setTimeout(() => notification.remove(), 2500);
 }
 
 // ============================================================================
-// EVENT LISTENERS
+// EVENT HANDLERS
 // ============================================================================
 
 /**
- * Set up click listeners for reply/submit buttons
+ * Handle click events for tracking
  */
-function setupReplyTracking() {
-  document.addEventListener('click', (event) => {
-    const target = event.target;
+function handleClick(event) {
+  const target = event.target;
+  if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
 
-    // Check if clicked element or its parents match submit button selectors
-    for (const selector of SELECTORS.REPLY_SUBMIT_BUTTONS) {
-      try {
-        if (target.matches(selector) || target.closest(selector)) {
-          debugLog('Reply submit button clicked!');
-          // Small delay to ensure the action completes
-          setTimeout(() => trackMetric('reply'), 500);
-          return;
-        }
-      } catch (e) {
-        // Invalid selector, skip
-      }
-    }
-
-    // Fallback: Check for button text content
-    const buttonText = target.textContent?.trim().toLowerCase();
-    if (target.tagName === 'BUTTON' &&
-        (buttonText === 'submit' || buttonText === 'send' || buttonText === 'submit as')) {
-      debugLog('Reply button clicked (text match)!');
-      setTimeout(() => trackMetric('reply'), 500);
-    }
-  }, true);
-}
-
-/**
- * Set up click listeners for chat end buttons
- */
-function setupChatTracking() {
-  document.addEventListener('click', (event) => {
-    const target = event.target;
-
-    for (const selector of SELECTORS.CHAT_END_BUTTONS) {
-      try {
-        if (target.matches(selector) || target.closest(selector)) {
-          debugLog('End chat button clicked!');
-          setTimeout(() => trackMetric('chat'), 500);
-          return;
-        }
-      } catch (e) {
-        // Invalid selector, skip
-      }
-    }
-
-    // Fallback: Check button text
-    const buttonText = target.textContent?.trim().toLowerCase();
-    if (target.tagName === 'BUTTON' &&
-        (buttonText === 'end chat' || buttonText === 'end conversation')) {
-      debugLog('End chat button clicked (text match)!');
-      setTimeout(() => trackMetric('chat'), 500);
-    }
-  }, true);
-}
-
-/**
- * Set up click listeners for call tracking
- */
-function setupCallTracking() {
-  // Track when dial button is clicked (outbound)
-  document.addEventListener('click', (event) => {
-    const target = event.target;
-
-    for (const selector of SELECTORS.CTI_OUTBOUND_INDICATORS) {
-      try {
-        if (target.matches(selector) || target.closest(selector)) {
-          debugLog('Outbound call initiated!');
-          state.lastCallDirection = 'outbound';
-          state.isCallActive = true;
-          return;
-        }
-      } catch (e) {
-        // Invalid selector
-      }
-    }
-  }, true);
-}
-
-// ============================================================================
-// MUTATION OBSERVERS
-// ============================================================================
-
-/**
- * Set up MutationObserver to watch for DOM changes
- */
-function setupMutationObservers() {
-  // Find the main container to observe
-  let targetNode = null;
-  for (const selector of SELECTORS.MAIN_CONTENT_CONTAINERS) {
-    targetNode = document.querySelector(selector);
-    if (targetNode) break;
+  // Check for Reply/Submit buttons
+  if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS)) {
+    log('Reply submit button clicked (selector match)');
+    setTimeout(() => trackMetric('reply'), 300);
+    return;
   }
 
-  if (!targetNode) {
-    targetNode = document.body;
+  // Check button text for replies
+  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT)) {
+    log('Reply submit button clicked (text match)');
+    setTimeout(() => trackMetric('reply'), 300);
+    return;
   }
 
-  debugLog('Setting up MutationObserver on:', targetNode);
+  // Check for Chat End buttons
+  if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
+    log('End chat button clicked (selector match)');
+    setTimeout(() => trackMetric('chat'), 300);
+    return;
+  }
 
-  const config = {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['class', 'data-test-id', 'data-call-status', 'data-chat-status'],
-  };
+  // Check button text for chat end
+  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.CHAT_END_TEXT)) {
+    log('End chat button clicked (text match)');
+    setTimeout(() => trackMetric('chat'), 300);
+    return;
+  }
 
+  // Check for Call End buttons
+  if (matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS)) {
+    log('End call button clicked');
+    const metric = state.lastCallDirection === 'outbound' ? 'outbound' : 'inbound';
+    setTimeout(() => trackMetric(metric), 300);
+    state.isCallActive = false;
+    state.lastCallDirection = null;
+    return;
+  }
+
+  // Check button text for call end
+  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.CTI_CALL_END_TEXT)) {
+    log('End call button clicked (text match)');
+    const metric = state.lastCallDirection === 'outbound' ? 'outbound' : 'inbound';
+    setTimeout(() => trackMetric(metric), 300);
+    state.isCallActive = false;
+    state.lastCallDirection = null;
+    return;
+  }
+
+  // Check for Outbound Call triggers (dial button)
+  if (matchesAnySelector(target, SELECTORS.CTI_OUTBOUND_TRIGGERS)) {
+    log('Outbound call initiated');
+    state.lastCallDirection = 'outbound';
+    state.isCallActive = true;
+    return;
+  }
+}
+
+// ============================================================================
+// MUTATION OBSERVER (for DOM changes)
+// ============================================================================
+
+function setupMutationObserver() {
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      // Check for chat ended indicators
-      if (mutation.type === 'childList') {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            checkForChatEnded(node);
-            checkForCallStateChange(node);
-            checkForIncomingCall(node);
-          }
-        });
-      }
+      if (mutation.type !== 'childList') continue;
 
-      // Check for attribute changes (call status, etc.)
-      if (mutation.type === 'attributes') {
-        checkForCallStateChange(mutation.target);
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+        // Check for incoming call indicators
+        if (matchesAnySelector(node, SELECTORS.CTI_INBOUND_INDICATORS)) {
+          log('Inbound call detected');
+          state.lastCallDirection = 'inbound';
+          state.isCallActive = true;
+        }
       }
     }
   });
 
-  observer.observe(targetNode, config);
-  state.observers.push(observer);
-}
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 
-/**
- * Check if a node indicates chat has ended
- */
-function checkForChatEnded(node) {
-  // Check element selectors
-  for (const selector of SELECTORS.CHAT_ENDED_INDICATORS) {
-    try {
-      if (node.matches && (node.matches(selector) || node.querySelector(selector))) {
-        debugLog('Chat ended indicator found via selector!');
-        trackMetric('chat');
-        return;
-      }
-    } catch (e) {
-      // Invalid selector
-    }
-  }
-
-  // Check text content
-  const textContent = node.textContent?.trim();
-  for (const pattern of SELECTORS.CHAT_ENDED_TEXT_PATTERNS) {
-    if (textContent && textContent.includes(pattern)) {
-      debugLog(`Chat ended indicator found via text: "${pattern}"`);
-      trackMetric('chat');
-      return;
-    }
-  }
-}
-
-/**
- * Check for incoming call indicators
- */
-function checkForIncomingCall(node) {
-  for (const selector of SELECTORS.CTI_INBOUND_INDICATORS) {
-    try {
-      if (node.matches && (node.matches(selector) || node.querySelector(selector))) {
-        debugLog('Incoming call detected!');
-        state.lastCallDirection = 'inbound';
-        state.isCallActive = true;
-        return;
-      }
-    } catch (e) {
-      // Invalid selector
-    }
-  }
-}
-
-/**
- * Check for call state changes (call ended)
- */
-function checkForCallStateChange(node) {
-  // Check if call became active
-  for (const selector of SELECTORS.CTI_ACTIVE_CALL_INDICATORS) {
-    try {
-      if (node.matches && (node.matches(selector) || node.querySelector(selector))) {
-        debugLog('Call is now active');
-        state.isCallActive = true;
-        return;
-      }
-    } catch (e) {
-      // Invalid selector
-    }
-  }
-
-  // Check if call ended
-  for (const selector of SELECTORS.CTI_CALL_ENDED_INDICATORS) {
-    try {
-      if (node.matches && (node.matches(selector) || node.querySelector(selector))) {
-        if (state.isCallActive) {
-          debugLog(`Call ended! Direction was: ${state.lastCallDirection}`);
-
-          if (state.lastCallDirection === 'inbound') {
-            trackMetric('inbound');
-          } else if (state.lastCallDirection === 'outbound') {
-            trackMetric('outbound');
-          } else {
-            // Default to inbound if direction unknown
-            debugLog('Call direction unknown, defaulting to inbound');
-            trackMetric('inbound');
-          }
-
-          state.isCallActive = false;
-          state.lastCallDirection = null;
-        }
-        return;
-      }
-    } catch (e) {
-      // Invalid selector
-    }
-  }
+  log('MutationObserver started');
+  return observer;
 }
 
 // ============================================================================
-// PERIODIC CHECK (FALLBACK)
+// MESSAGE HANDLER (for popup communication)
 // ============================================================================
 
-/**
- * Periodically check for state changes that mutations might miss
- */
-function setupPeriodicCheck() {
-  setInterval(() => {
-    // Check for chat ended text patterns
-    if (checkForTextPatterns(SELECTORS.CHAT_ENDED_TEXT_PATTERNS)) {
-      // This is handled by MutationObserver normally
-    }
-
-    // Check for call ended indicators
-    const callEndedElement = findElement(SELECTORS.CTI_CALL_ENDED_INDICATORS);
-    if (callEndedElement && state.isCallActive) {
-      debugLog('Call ended detected via periodic check');
-      if (state.lastCallDirection === 'inbound') {
-        trackMetric('inbound');
-      } else {
-        trackMetric('outbound');
-      }
-      state.isCallActive = false;
-      state.lastCallDirection = null;
-    }
-
-    // Check for active calls
-    const activeCallElement = findElement(SELECTORS.CTI_ACTIVE_CALL_INDICATORS);
-    if (activeCallElement && !state.isCallActive) {
-      debugLog('Active call detected via periodic check');
-      state.isCallActive = true;
-
-      // Try to determine direction
-      if (findElement(SELECTORS.CTI_INBOUND_INDICATORS)) {
-        state.lastCallDirection = 'inbound';
-      } else if (findElement(SELECTORS.CTI_OUTBOUND_INDICATORS)) {
-        state.lastCallDirection = 'outbound';
-      }
-    }
-  }, 1000);
-}
-
-// ============================================================================
-// MESSAGE LISTENER
-// ============================================================================
-
-/**
- * Listen for messages from popup or background
- */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ status: 'active', url: window.location.href });
     return true;
   }
-
-  if (message.type === 'GET_DEBUG_INFO') {
-    sendResponse({
-      selectors: SELECTORS,
-      state: {
-        isCallActive: state.isCallActive,
-        lastCallDirection: state.lastCallDirection,
-        observerCount: state.observers.length,
-      },
-    });
-    return true;
-  }
+  return false;
 });
 
 // ============================================================================
@@ -637,25 +379,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ============================================================================
 
 function init() {
-  debugLog('Initializing Zendesk KPI Tracker...');
-  debugLog('Current URL:', window.location.href);
+  log('Initializing on:', window.location.href);
 
-  // Set up event listeners
-  setupReplyTracking();
-  setupChatTracking();
-  setupCallTracking();
+  // Add click listener (capture phase to catch all clicks)
+  document.addEventListener('click', handleClick, true);
 
-  // Set up MutationObservers
-  setupMutationObservers();
+  // Setup mutation observer for DOM changes
+  setupMutationObserver();
 
-  // Set up periodic fallback check
-  setupPeriodicCheck();
-
-  debugLog('Zendesk KPI Tracker initialized successfully!');
-  debugLog('Selectors loaded:', Object.keys(SELECTORS).length);
+  log('Initialized successfully');
 }
 
-// Wait for DOM to be ready
+// Wait for document to be ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

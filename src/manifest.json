@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Zendesk KPI Tracker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Track your daily Customer Support metrics in real-time with a Power BI-style dashboard",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "contextMenus",
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.zendesk.com/*"
@@ -17,7 +20,8 @@
     {
       "matches": ["*://*.zendesk.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "action": {

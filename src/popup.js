@@ -1,12 +1,7 @@
 /**
  * Zendesk KPI Tracker - Popup Dashboard Script
  *
- * Handles:
- * - Loading and displaying metrics from storage
- * - Manual metric tracking buttons
- * - Chart rendering with Chart.js
- * - CSV export functionality
- * - Settings management
+ * Handles the dashboard UI, manual tracking, charts, and CSV export.
  */
 
 // ============================================================================
@@ -20,20 +15,6 @@ const DEFAULT_GOALS = {
   outbound: 5,
 };
 
-const METRIC_LABELS = {
-  reply: 'Replies Sent',
-  chat: 'Chats Completed',
-  inbound: 'Inbound Calls',
-  outbound: 'Outbound Calls',
-};
-
-const CHART_COLORS = {
-  reply: '#5b9bd5',
-  chat: '#70ad47',
-  inbound: '#ed7d31',
-  outbound: '#7030a0',
-};
-
 let chart = null;
 let currentMetrics = null;
 let goals = { ...DEFAULT_GOALS };
@@ -42,57 +23,15 @@ let goals = { ...DEFAULT_GOALS };
 // UTILITY FUNCTIONS
 // ============================================================================
 
-/**
- * Get today's date as YYYY-MM-DD string
- */
 function getTodayDateString() {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
 }
 
-/**
- * Format date for display
- */
-function formatDisplayDate(dateString) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
-/**
- * Calculate percentage (capped at 100%)
- */
 function calculateProgress(current, goal) {
   if (goal === 0) return 0;
   return Math.min((current / goal) * 100, 100);
 }
 
-// ============================================================================
-// STORAGE FUNCTIONS
-// ============================================================================
-
-/**
- * Load metrics from Chrome storage
- */
-async function loadMetrics() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['metrics', 'goals', 'history'], (result) => {
-      resolve({
-        metrics: result.metrics || createEmptyMetrics(),
-        goals: result.goals || DEFAULT_GOALS,
-        history: result.history || [],
-      });
-    });
-  });
-}
-
-/**
- * Create empty metrics object for today
- */
 function createEmptyMetrics() {
   return {
     date: getTodayDateString(),
@@ -104,9 +43,46 @@ function createEmptyMetrics() {
   };
 }
 
-/**
- * Save goals to storage
- */
+// ============================================================================
+// STORAGE FUNCTIONS (Direct access - more reliable than messaging)
+// ============================================================================
+
+async function loadFromStorage() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['metrics', 'goals', 'history'], (result) => {
+      const metrics = result.metrics || createEmptyMetrics();
+      const storedGoals = result.goals || DEFAULT_GOALS;
+      const history = result.history || [];
+
+      // Check if it's a new day
+      if (metrics.date !== getTodayDateString()) {
+        // Archive old metrics and create new ones
+        if (metrics.date) {
+          history.push({
+            date: metrics.date,
+            reply: metrics.reply || 0,
+            chat: metrics.chat || 0,
+            inbound: metrics.inbound || 0,
+            outbound: metrics.outbound || 0,
+          });
+        }
+        const newMetrics = createEmptyMetrics();
+        chrome.storage.local.set({ metrics: newMetrics, history: history.slice(-90) });
+        resolve({ metrics: newMetrics, goals: storedGoals, history });
+      } else {
+        resolve({ metrics, goals: storedGoals, history });
+      }
+    });
+  });
+}
+
+async function saveMetrics(metrics) {
+  return new Promise((resolve) => {
+    metrics.lastUpdated = Date.now();
+    chrome.storage.local.set({ metrics }, resolve);
+  });
+}
+
 async function saveGoals(newGoals) {
   return new Promise((resolve) => {
     chrome.storage.local.set({ goals: newGoals }, resolve);
@@ -114,131 +90,151 @@ async function saveGoals(newGoals) {
 }
 
 // ============================================================================
-// UI UPDATE FUNCTIONS
+// MANUAL TRACKING (Direct storage update - no background dependency)
 // ============================================================================
 
-/**
- * Update the date display in header
- */
-function updateDateDisplay() {
-  const dateEl = document.getElementById('currentDate');
-  const today = new Date();
-  dateEl.textContent = today.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
+async function trackMetric(metricType) {
+  console.log('[ZKT] Tracking metric:', metricType);
 
-/**
- * Update connection status indicator
- */
-async function updateConnectionStatus() {
-  const statusIndicator = document.getElementById('statusIndicator');
-  const statusText = statusIndicator.querySelector('.status-text');
+  const data = await loadFromStorage();
+  currentMetrics = data.metrics;
 
-  try {
-    // Check if we're connected to a Zendesk tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Increment the metric
+  if (currentMetrics[metricType] !== undefined) {
+    currentMetrics[metricType]++;
+    await saveMetrics(currentMetrics);
 
-    if (tab && tab.url && tab.url.includes('zendesk.com')) {
-      // Try to ping the content script
-      chrome.tabs.sendMessage(tab.id, { type: 'PING' }, (response) => {
-        if (chrome.runtime.lastError || !response) {
-          statusIndicator.className = 'status-indicator disconnected';
-          statusText.textContent = 'Not tracking (refresh page)';
-        } else {
-          statusIndicator.className = 'status-indicator connected';
-          statusText.textContent = 'Tracking active';
-        }
-      });
-    } else {
-      statusIndicator.className = 'status-indicator disconnected';
-      statusText.textContent = 'Open Zendesk to track';
-    }
-  } catch (error) {
-    statusIndicator.className = 'status-indicator disconnected';
-    statusText.textContent = 'Connection error';
+    // Update UI immediately
+    updateScorecards(currentMetrics);
+    updateChart(currentMetrics);
+
+    // Show feedback
+    showFeedback(`+1 ${metricType}`);
+    console.log('[ZKT] Metric tracked:', metricType, '=', currentMetrics[metricType]);
   }
 }
 
-/**
- * Update all scorecard displays
- */
-function updateScorecards(metrics) {
-  // Replies
-  updateScorecard('replies', metrics.reply, goals.reply);
-  // Chats
-  updateScorecard('chats', metrics.chat, goals.chat);
-  // Inbound
-  updateScorecard('inbound', metrics.inbound, goals.inbound);
-  // Outbound
-  updateScorecard('outbound', metrics.outbound, goals.outbound);
+function showFeedback(message) {
+  // Brief visual feedback on the button
+  const btn = document.querySelector(`[data-metric="${message.split(' ')[1]}"]`);
+  if (btn) {
+    btn.style.transform = 'scale(0.95)';
+    setTimeout(() => {
+      btn.style.transform = '';
+    }, 150);
+  }
 }
 
-/**
- * Update a single scorecard
- */
+// ============================================================================
+// UI UPDATE FUNCTIONS
+// ============================================================================
+
+function updateDateDisplay() {
+  const dateEl = document.getElementById('currentDate');
+  if (dateEl) {
+    dateEl.textContent = new Date().toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+}
+
+async function updateConnectionStatus() {
+  const statusIndicator = document.getElementById('statusIndicator');
+  const statusText = statusIndicator?.querySelector('.status-text');
+
+  if (!statusIndicator || !statusText) return;
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (tab?.url?.includes('zendesk.com')) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+        statusIndicator.className = 'status-indicator connected';
+        statusText.textContent = 'Tracking active';
+      } catch {
+        statusIndicator.className = 'status-indicator disconnected';
+        statusText.textContent = 'Refresh Zendesk page';
+      }
+    } else {
+      statusIndicator.className = 'status-indicator disconnected';
+      statusText.textContent = 'Open Zendesk to auto-track';
+    }
+  } catch (error) {
+    statusIndicator.className = 'status-indicator disconnected';
+    statusText.textContent = 'Manual mode only';
+  }
+}
+
+function updateScorecards(metrics) {
+  if (!metrics) return;
+
+  updateScorecard('replies', metrics.reply || 0, goals.reply);
+  updateScorecard('chats', metrics.chat || 0, goals.chat);
+  updateScorecard('inbound', metrics.inbound || 0, goals.inbound);
+  updateScorecard('outbound', metrics.outbound || 0, goals.outbound);
+}
+
 function updateScorecard(type, count, goal) {
   const countEl = document.getElementById(`${type}Count`);
   const goalEl = document.getElementById(`${type}Goal`);
   const progressEl = document.getElementById(`${type}Progress`);
 
-  // Update count with animation
-  const oldCount = parseInt(countEl.textContent) || 0;
-  if (count !== oldCount) {
-    countEl.classList.remove('updated');
-    void countEl.offsetWidth; // Trigger reflow
-    countEl.classList.add('updated');
+  if (countEl) {
+    const oldCount = parseInt(countEl.textContent) || 0;
+    if (count !== oldCount) {
+      countEl.classList.remove('updated');
+      void countEl.offsetWidth;
+      countEl.classList.add('updated');
+    }
+    countEl.textContent = count;
   }
-  countEl.textContent = count;
 
-  // Update goal
-  goalEl.textContent = goal;
-
-  // Update progress bar
-  const progress = calculateProgress(count, goal);
-  progressEl.style.width = `${progress}%`;
+  if (goalEl) goalEl.textContent = goal;
+  if (progressEl) progressEl.style.width = `${calculateProgress(count, goal)}%`;
 }
 
-/**
- * Update goal inputs in settings
- */
 function updateGoalInputs() {
-  document.getElementById('goalReplies').value = goals.reply;
-  document.getElementById('goalChats').value = goals.chat;
-  document.getElementById('goalInbound').value = goals.inbound;
-  document.getElementById('goalOutbound').value = goals.outbound;
+  const inputs = {
+    goalReplies: goals.reply,
+    goalChats: goals.chat,
+    goalInbound: goals.inbound,
+    goalOutbound: goals.outbound,
+  };
+
+  Object.entries(inputs).forEach(([id, value]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  });
 }
 
 // ============================================================================
 // CHART FUNCTIONS
 // ============================================================================
 
-/**
- * Initialize or update the performance chart
- */
 function updateChart(metrics) {
-  const ctx = document.getElementById('performanceChart').getContext('2d');
+  if (!metrics) return;
+
+  const canvas = document.getElementById('performanceChart');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
 
   const data = {
     labels: ['Replies', 'Chats', 'Inbound', 'Outbound'],
     datasets: [
       {
         label: 'Today',
-        data: [metrics.reply, metrics.chat, metrics.inbound, metrics.outbound],
+        data: [metrics.reply || 0, metrics.chat || 0, metrics.inbound || 0, metrics.outbound || 0],
         backgroundColor: [
           'rgba(91, 155, 213, 0.8)',
           'rgba(112, 173, 71, 0.8)',
           'rgba(237, 125, 49, 0.8)',
           'rgba(112, 48, 160, 0.8)',
         ],
-        borderColor: [
-          '#5b9bd5',
-          '#70ad47',
-          '#ed7d31',
-          '#7030a0',
-        ],
+        borderColor: ['#5b9bd5', '#70ad47', '#ed7d31', '#7030a0'],
         borderWidth: 1,
         borderRadius: 4,
         barPercentage: 0.6,
@@ -268,9 +264,7 @@ function updateChart(metrics) {
           position: 'top',
           labels: {
             color: '#a0a0a0',
-            font: {
-              size: 11,
-            },
+            font: { size: 11 },
             padding: 10,
             usePointStyle: true,
             pointStyle: 'rectRounded',
@@ -288,28 +282,13 @@ function updateChart(metrics) {
       },
       scales: {
         x: {
-          grid: {
-            display: false,
-          },
-          ticks: {
-            color: '#a0a0a0',
-            font: {
-              size: 10,
-            },
-          },
+          grid: { display: false },
+          ticks: { color: '#a0a0a0', font: { size: 10 } },
         },
         y: {
           beginAtZero: true,
-          grid: {
-            color: 'rgba(255, 255, 255, 0.05)',
-          },
-          ticks: {
-            color: '#a0a0a0',
-            font: {
-              size: 10,
-            },
-            stepSize: 5,
-          },
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#a0a0a0', font: { size: 10 }, stepSize: 5 },
         },
       },
     },
@@ -324,98 +303,49 @@ function updateChart(metrics) {
 }
 
 // ============================================================================
-// MANUAL TRACKING
-// ============================================================================
-
-/**
- * Handle manual metric increment
- */
-function handleManualTrack(metricType) {
-  chrome.runtime.sendMessage({
-    type: 'TRACK_METRIC',
-    metric: metricType,
-    timestamp: Date.now(),
-    manual: true,
-  }, (response) => {
-    if (response && response.success) {
-      // Reload metrics to update display
-      refreshData();
-    }
-  });
-}
-
-// ============================================================================
 // CSV EXPORT
 // ============================================================================
 
-/**
- * Export metrics to CSV file
- */
 async function exportToCSV() {
-  const data = await loadMetrics();
+  const data = await loadFromStorage();
   const { metrics, history } = data;
 
-  // Combine current metrics with history
   const allData = [...history];
-
-  // Add today's data if not already in history
-  const todayExists = history.some((h) => h.date === metrics.date);
-  if (!todayExists) {
+  if (!history.some((h) => h.date === metrics.date)) {
     allData.push(metrics);
   }
-
-  // Sort by date
   allData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  // Create CSV content
-  const headers = ['Date', 'Replies Sent', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total Interactions'];
+  const headers = ['Date', 'Replies Sent', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
   const rows = allData.map((day) => {
     const total = (day.reply || 0) + (day.chat || 0) + (day.inbound || 0) + (day.outbound || 0);
-    return [
-      day.date,
-      day.reply || 0,
-      day.chat || 0,
-      day.inbound || 0,
-      day.outbound || 0,
-      total,
-    ];
+    return [day.date, day.reply || 0, day.chat || 0, day.inbound || 0, day.outbound || 0, total];
   });
 
-  // Add summary row
   const totals = allData.reduce(
-    (acc, day) => {
-      acc.reply += day.reply || 0;
-      acc.chat += day.chat || 0;
-      acc.inbound += day.inbound || 0;
-      acc.outbound += day.outbound || 0;
-      return acc;
-    },
+    (acc, day) => ({
+      reply: acc.reply + (day.reply || 0),
+      chat: acc.chat + (day.chat || 0),
+      inbound: acc.inbound + (day.inbound || 0),
+      outbound: acc.outbound + (day.outbound || 0),
+    }),
     { reply: 0, chat: 0, inbound: 0, outbound: 0 }
   );
 
   rows.push([]);
-  rows.push([
-    'TOTAL',
-    totals.reply,
-    totals.chat,
-    totals.inbound,
-    totals.outbound,
-    totals.reply + totals.chat + totals.inbound + totals.outbound,
-  ]);
+  rows.push(['TOTAL', totals.reply, totals.chat, totals.inbound, totals.outbound,
+    totals.reply + totals.chat + totals.inbound + totals.outbound]);
 
-  // Convert to CSV string
-  const csvContent = [
-    headers.join(','),
-    ...rows.map((row) => row.join(',')),
-  ].join('\n');
+  const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
 
-  // Create and download file
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = `zendesk-kpi-${getTodayDateString()}.csv`;
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
@@ -423,136 +353,75 @@ async function exportToCSV() {
 // RESET FUNCTIONALITY
 // ============================================================================
 
-/**
- * Reset today's metrics
- */
 async function resetToday() {
-  if (!confirm('Are you sure you want to reset today\'s metrics? This cannot be undone.')) {
-    return;
-  }
+  if (!confirm('Reset all of today\'s metrics to zero?')) return;
 
-  chrome.runtime.sendMessage({ type: 'RESET_TODAY' }, (response) => {
-    if (response && response.success) {
-      refreshData();
-    }
-  });
+  currentMetrics = createEmptyMetrics();
+  await saveMetrics(currentMetrics);
+  updateScorecards(currentMetrics);
+  updateChart(currentMetrics);
 }
 
 // ============================================================================
 // SETTINGS MODAL
 // ============================================================================
 
-/**
- * Open settings modal
- */
 function openSettings() {
-  document.getElementById('settingsModal').classList.add('active');
+  document.getElementById('settingsModal')?.classList.add('active');
   updateGoalInputs();
 }
 
-/**
- * Close settings modal
- */
 function closeSettings() {
-  document.getElementById('settingsModal').classList.remove('active');
+  document.getElementById('settingsModal')?.classList.remove('active');
 }
 
-/**
- * Save settings from modal
- */
 async function handleSaveSettings() {
-  const newGoals = {
-    reply: parseInt(document.getElementById('goalReplies').value) || DEFAULT_GOALS.reply,
-    chat: parseInt(document.getElementById('goalChats').value) || DEFAULT_GOALS.chat,
-    inbound: parseInt(document.getElementById('goalInbound').value) || DEFAULT_GOALS.inbound,
-    outbound: parseInt(document.getElementById('goalOutbound').value) || DEFAULT_GOALS.outbound,
+  goals = {
+    reply: parseInt(document.getElementById('goalReplies')?.value) || DEFAULT_GOALS.reply,
+    chat: parseInt(document.getElementById('goalChats')?.value) || DEFAULT_GOALS.chat,
+    inbound: parseInt(document.getElementById('goalInbound')?.value) || DEFAULT_GOALS.inbound,
+    outbound: parseInt(document.getElementById('goalOutbound')?.value) || DEFAULT_GOALS.outbound,
   };
 
-  await saveGoals(newGoals);
-  goals = newGoals;
-
-  // Update displays
+  await saveGoals(goals);
   updateScorecards(currentMetrics);
   updateChart(currentMetrics);
-
   closeSettings();
-}
-
-// ============================================================================
-// DATA REFRESH
-// ============================================================================
-
-/**
- * Refresh all data from storage
- */
-async function refreshData() {
-  const data = await loadMetrics();
-  currentMetrics = data.metrics;
-  goals = data.goals;
-
-  // Check if we need to reset for a new day
-  if (currentMetrics.date !== getTodayDateString()) {
-    // Archive yesterday's data and create new metrics
-    chrome.runtime.sendMessage({ type: 'NEW_DAY_CHECK' }, async () => {
-      const newData = await loadMetrics();
-      currentMetrics = newData.metrics;
-      updateUI();
-    });
-  } else {
-    updateUI();
-  }
-}
-
-/**
- * Update all UI components
- */
-function updateUI() {
-  updateDateDisplay();
-  updateConnectionStatus();
-  updateScorecards(currentMetrics);
-  updateChart(currentMetrics);
-  updateGoalInputs();
 }
 
 // ============================================================================
 // EVENT LISTENERS
 // ============================================================================
 
-/**
- * Set up all event listeners
- */
 function setupEventListeners() {
   // Manual tracking buttons
   document.querySelectorAll('.manual-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
       const metric = btn.dataset.metric;
-      handleManualTrack(metric);
+      if (metric) {
+        trackMetric(metric);
+      }
     });
   });
 
   // Export button
-  document.getElementById('exportBtn').addEventListener('click', exportToCSV);
+  document.getElementById('exportBtn')?.addEventListener('click', exportToCSV);
 
   // Reset button
-  document.getElementById('resetBtn').addEventListener('click', resetToday);
+  document.getElementById('resetBtn')?.addEventListener('click', resetToday);
 
-  // Settings button
-  document.getElementById('settingsBtn').addEventListener('click', openSettings);
+  // Settings
+  document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
+  document.getElementById('closeSettings')?.addEventListener('click', closeSettings);
+  document.getElementById('saveSettings')?.addEventListener('click', handleSaveSettings);
 
-  // Close settings button
-  document.getElementById('closeSettings').addEventListener('click', closeSettings);
-
-  // Save settings button
-  document.getElementById('saveSettings').addEventListener('click', handleSaveSettings);
-
-  // Close modal on outside click
-  document.getElementById('settingsModal').addEventListener('click', (e) => {
-    if (e.target.id === 'settingsModal') {
-      closeSettings();
-    }
+  // Close modal on backdrop click
+  document.getElementById('settingsModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'settingsModal') closeSettings();
   });
 
-  // Listen for storage changes (real-time updates)
+  // Listen for storage changes from content script
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local' && changes.metrics) {
       currentMetrics = changes.metrics.newValue;
@@ -566,21 +435,41 @@ function setupEventListeners() {
 // INITIALIZATION
 // ============================================================================
 
-/**
- * Initialize the popup
- */
 async function init() {
-  console.log('[Zendesk KPI Tracker] Popup initialized');
+  console.log('[ZKT] Initializing popup...');
 
-  // Set up event listeners
-  setupEventListeners();
+  try {
+    // Load data from storage
+    const data = await loadFromStorage();
+    currentMetrics = data.metrics;
+    goals = data.goals;
 
-  // Load and display data
-  await refreshData();
+    console.log('[ZKT] Loaded metrics:', currentMetrics);
+    console.log('[ZKT] Loaded goals:', goals);
 
-  // Update connection status periodically
-  setInterval(updateConnectionStatus, 5000);
+    // Setup UI
+    setupEventListeners();
+    updateDateDisplay();
+    updateScorecards(currentMetrics);
+    updateGoalInputs();
+
+    // Initialize chart after a brief delay to ensure canvas is ready
+    setTimeout(() => {
+      updateChart(currentMetrics);
+    }, 100);
+
+    // Check connection status
+    updateConnectionStatus();
+
+    console.log('[ZKT] Popup initialized successfully');
+  } catch (error) {
+    console.error('[ZKT] Initialization error:', error);
+  }
 }
 
-// Start the popup
-document.addEventListener('DOMContentLoaded', init);
+// Start when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
