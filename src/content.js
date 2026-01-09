@@ -770,43 +770,13 @@ window.ZKT = {
  */
 function injectInterceptionScript() {
   const script = document.createElement('script');
-  script.textContent = `
-    (function() {
-      console.log('[ZKT Injected] Starting fetch/XHR interception in page context');
-
-      // Intercept fetch
-      const originalFetch = window.fetch;
-      window.fetch = function(...args) {
-        const [resource, config] = args;
-        const url = typeof resource === 'string' ? resource : resource.url;
-        const method = config?.method || 'GET';
-
-        console.log('[ZKT Injected] Fetch intercepted:', url, method);
-
-        // Send message to content script about this request
-        if (method === 'POST' && url.includes('/api/graphql')) {
-          const body = config?.body;
-          try {
-            const data = JSON.parse(body);
-            window.postMessage({
-              type: 'ZKT_GRAPHQL_REQUEST',
-              data: { url, method, operationName: data.operationName, variables: data.variables }
-            }, '*');
-          } catch (e) {
-            // Ignore parse errors
-          }
-        }
-
-        return originalFetch.apply(this, args);
-      };
-
-      console.log('[ZKT Injected] Fetch interception installed');
-    })();
-  `;
+  script.src = chrome.runtime.getURL('inject.js');
+  script.onload = function() {
+    this.remove(); // Clean up after loading
+  };
 
   // Inject before any other scripts
   (document.head || document.documentElement).appendChild(script);
-  script.remove(); // Clean up the script element
 
   log('Interception script injected into page context');
 }
