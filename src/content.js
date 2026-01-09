@@ -158,27 +158,11 @@ function shouldDebounce(eventType) {
  * Check if API request is a reply submission and if it's public
  */
 function isPublicReplyRequest(url, method, payload) {
-  // Zendesk API endpoints for comments/replies
-  const replyEndpoints = [
-    '/api/v2/tickets/',
-    '/api/v2/channels/voice/tickets/',
-    'api/lotus/tickets/',
-    'api/v2/any_channel/tickets/',
-  ];
-
-  // Check if URL matches reply endpoints
-  const isReplyEndpoint = replyEndpoints.some(endpoint => url.includes(endpoint)) &&
-                          (url.includes('/comments') || url.includes('/comment'));
-
-  if (!isReplyEndpoint || method !== 'POST') {
-    return null; // Not a reply submission
+  if (method !== 'POST') {
+    return null; // Not a POST request
   }
 
-  if (DEBUG_MODE) {
-    log('Reply API call detected:', { url, payload });
-  }
-
-  // Parse payload to check if it's public
+  // Parse payload to check if it's a reply/comment
   try {
     let data = payload;
 
@@ -187,24 +171,108 @@ function isPublicReplyRequest(url, method, payload) {
       data = JSON.parse(payload);
     }
 
-    // Check various payload structures Zendesk uses
-    const comment = data?.comment || data?.ticket?.comment || data;
+    // Handle GraphQL API (modern Zendesk)
+    if (url.includes('/api/graphql')) {
+      const operationName = data?.operationName || '';
+      const variables = data?.variables || {};
 
-    // If public field exists, use it directly
-    if (comment?.public !== undefined) {
-      return comment.public === true;
+      if (DEBUG_MODE) {
+        log('GraphQL request detected:', { operationName, variables });
+      }
+
+      // Check if this is a comment/reply mutation
+      // Common GraphQL mutation names for comments/replies
+      const replyOperations = [
+        'sendmessage',
+        'createmessage',
+        'addcomment',
+        'createcomment',
+        'submitticket',
+        'updateticket',
+        'sendreply',
+        'createreply',
+      ];
+
+      const isReplyOperation = replyOperations.some(op =>
+        operationName.toLowerCase().includes(op)
+      );
+
+      if (!isReplyOperation) {
+        return null; // Not a reply operation
+      }
+
+      if (DEBUG_MODE) {
+        log('Reply operation detected:', { operationName, variables });
+      }
+
+      // Check if the comment/message is public
+      // GraphQL variables can have different structures
+      const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
+
+      if (message) {
+        // Check for isPublic, public, or isInternal fields
+        if (message.isPublic !== undefined) {
+          return message.isPublic === true;
+        }
+        if (message.public !== undefined) {
+          return message.public === true;
+        }
+        if (message.isInternal !== undefined) {
+          return message.isInternal === false; // isInternal: false means it's public
+        }
+      }
+
+      // Check top-level variables
+      if (variables.isPublic !== undefined) {
+        return variables.isPublic === true;
+      }
+      if (variables.public !== undefined) {
+        return variables.public === true;
+      }
+      if (variables.isInternal !== undefined) {
+        return variables.isInternal === false;
+      }
+
+      // Default to true if we can't determine (safer to track)
+      if (DEBUG_MODE) {
+        log('Could not determine public/private from GraphQL, defaulting to public', variables);
+      }
+      return true;
     }
 
-    // Default to true if we can't determine (safer to track)
-    if (DEBUG_MODE) {
-      log('Could not determine public/private, defaulting to public', comment);
+    // Handle REST API (legacy Zendesk)
+    const replyEndpoints = [
+      '/api/v2/tickets/',
+      '/api/v2/channels/voice/tickets/',
+      'api/lotus/tickets/',
+      'api/v2/any_channel/tickets/',
+    ];
+
+    const isReplyEndpoint = replyEndpoints.some(endpoint => url.includes(endpoint)) &&
+                            (url.includes('/comments') || url.includes('/comment'));
+
+    if (isReplyEndpoint) {
+      if (DEBUG_MODE) {
+        log('REST reply API call detected:', { url, payload });
+      }
+
+      // Check various payload structures Zendesk uses
+      const comment = data?.comment || data?.ticket?.comment || data;
+
+      // If public field exists, use it directly
+      if (comment?.public !== undefined) {
+        return comment.public === true;
+      }
+
+      return true; // Default to tracking
     }
-    return true;
+
+    return null; // Not a reply request
   } catch (e) {
     if (DEBUG_MODE) {
       log('Error parsing reply payload:', e);
     }
-    return true; // Default to tracking
+    return null; // Don't track if we can't parse
   }
 }
 
