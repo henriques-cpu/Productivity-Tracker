@@ -65,22 +65,22 @@
       // Try to parse as JSON and look for GraphQL operations
       try {
         const parsed = JSON.parse(data);
+        console.log('[ZKT Injected] WebSocket message parsed:', parsed);
 
-        // Check if this looks like a GraphQL operation
-        if (parsed.operationName || parsed.query || parsed.mutation) {
-          window.postMessage({
-            type: 'ZKT_WEBSOCKET_MESSAGE',
-            data: {
-              operationName: parsed.operationName,
-              variables: parsed.variables,
-              query: parsed.query,
-              mutation: parsed.mutation,
-              payload: parsed
-            }
-          }, '*');
-        }
+        // Forward ALL parsed messages to content script for inspection
+        window.postMessage({
+          type: 'ZKT_WEBSOCKET_MESSAGE',
+          data: {
+            operationName: parsed.operationName,
+            variables: parsed.variables,
+            query: parsed.query,
+            mutation: parsed.mutation,
+            payload: parsed
+          }
+        }, '*');
       } catch (e) {
-        // Not JSON or parsing error, ignore
+        // Not JSON or parsing error
+        console.log('[ZKT Injected] WebSocket message not JSON:', e);
       }
 
       return originalSend.apply(this, arguments);

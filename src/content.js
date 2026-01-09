@@ -805,10 +805,13 @@ window.addEventListener('message', (event) => {
   if (event.data.type === 'ZKT_WEBSOCKET_MESSAGE') {
     const { operationName, variables, payload } = event.data.data;
 
-    log('WebSocket message from page:', { operationName, variables, payload });
+    log('WebSocket message from page:', payload);
 
     if (operationName) {
       checkAndTrackReply(operationName, variables);
+    } else {
+      // Log messages without operationName for debugging
+      log('WebSocket message without operationName:', payload);
     }
   }
 });
