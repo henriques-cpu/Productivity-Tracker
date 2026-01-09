@@ -282,11 +282,20 @@ function isPublicReplyRequest(url, method, payload) {
 function interceptFetch() {
   const originalFetch = window.fetch;
 
+  if (!originalFetch) {
+    log('ERROR: window.fetch is not available!');
+    return;
+  }
+
   window.fetch = function(...args) {
     const [resource, config] = args;
     const url = typeof resource === 'string' ? resource : resource.url;
     const method = config?.method || 'GET';
     const body = config?.body;
+
+    if (DEBUG_MODE) {
+      log('Fetch intercepted:', { url, method });
+    }
 
     // Check if this is a public reply submission
     const isPublic = isPublicReplyRequest(url, method.toUpperCase(), body);
@@ -308,6 +317,8 @@ function interceptFetch() {
 
     return promise;
   };
+
+  log('Fetch interception installed successfully');
 }
 
 /**
@@ -578,25 +589,6 @@ function handleClick(event) {
 
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
-
-  // DEBUG: Log every click on buttons/interactive elements
-  if (DEBUG_MODE) {
-    const isButton = target.tagName === 'BUTTON' ||
-                     target.getAttribute('role') === 'button' ||
-                     target.tagName === 'A';
-
-    if (isButton || target.getAttribute('data-test-id')) {
-      console.group('[ZKT DEBUG] Click detected');
-      console.log('Raw target:', getElementDebugInfo(rawTarget));
-      console.log('Interactive target:', getElementDebugInfo(target));
-      console.log('Element:', target);
-
-      // Test each selector category
-      console.log('Matches CHAT_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS));
-      console.log('Matches CTI_CALL_END_BUTTONS:', matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS));
-      console.groupEnd();
-    }
-  }
 
   // NOTE: Reply tracking is now done via network interception, not button clicks
 
