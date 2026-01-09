@@ -761,13 +761,118 @@ window.ZKT = {
 };
 
 // ============================================================================
-// INITIALIZATION
+// INJECT SCRIPT INTO PAGE CONTEXT
 // ============================================================================
 
-// Initialize network interception immediately (before DOM loads)
-interceptFetch();
-interceptXHR();
-log('Network interception enabled - tracking actual reply submissions');
+/**
+ * Inject fetch/XHR interception into the page's main world
+ * This is necessary because content scripts run in an isolated world
+ */
+function injectInterceptionScript() {
+  const script = document.createElement('script');
+  script.textContent = `
+    (function() {
+      console.log('[ZKT Injected] Starting fetch/XHR interception in page context');
+
+      // Intercept fetch
+      const originalFetch = window.fetch;
+      window.fetch = function(...args) {
+        const [resource, config] = args;
+        const url = typeof resource === 'string' ? resource : resource.url;
+        const method = config?.method || 'GET';
+
+        console.log('[ZKT Injected] Fetch intercepted:', url, method);
+
+        // Send message to content script about this request
+        if (method === 'POST' && url.includes('/api/graphql')) {
+          const body = config?.body;
+          try {
+            const data = JSON.parse(body);
+            window.postMessage({
+              type: 'ZKT_GRAPHQL_REQUEST',
+              data: { url, method, operationName: data.operationName, variables: data.variables }
+            }, '*');
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+
+        return originalFetch.apply(this, args);
+      };
+
+      console.log('[ZKT Injected] Fetch interception installed');
+    })();
+  `;
+
+  // Inject before any other scripts
+  (document.head || document.documentElement).appendChild(script);
+  script.remove(); // Clean up the script element
+
+  log('Interception script injected into page context');
+}
+
+// Inject immediately
+injectInterceptionScript();
+
+// ============================================================================
+// LISTEN FOR MESSAGES FROM INJECTED SCRIPT
+// ============================================================================
+
+window.addEventListener('message', (event) => {
+  // Only accept messages from same window
+  if (event.source !== window) return;
+
+  if (event.data.type === 'ZKT_GRAPHQL_REQUEST') {
+    const { operationName, variables } = event.data.data;
+
+    log('GraphQL request from page:', { operationName, variables });
+
+    // Check if this is a reply operation
+    const replyOperations = [
+      'sendmessage',
+      'createmessage',
+      'addcomment',
+      'createcomment',
+      'submitticket',
+      'updateticket',
+      'sendreply',
+      'createreply',
+    ];
+
+    const isReplyOperation = replyOperations.some(op =>
+      operationName.toLowerCase().includes(op)
+    );
+
+    if (isReplyOperation) {
+      log('Reply operation detected:', { operationName, variables });
+
+      // Check if public
+      const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
+      let isPublic = true; // Default to public
+
+      if (message) {
+        if (message.isPublic !== undefined) {
+          isPublic = message.isPublic === true;
+        } else if (message.public !== undefined) {
+          isPublic = message.public === true;
+        } else if (message.isInternal !== undefined) {
+          isPublic = message.isInternal === false;
+        }
+      }
+
+      if (isPublic) {
+        log('Public reply detected - tracking');
+        trackMetric('reply');
+      } else {
+        log('Internal note detected - not tracking');
+      }
+    }
+  }
+});
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
 
 function init() {
   log('Initializing on:', window.location.href);
