@@ -803,15 +803,43 @@ window.addEventListener('message', (event) => {
 
   // Handle WebSocket messages
   if (event.data.type === 'ZKT_WEBSOCKET_MESSAGE') {
-    const { operationName, variables, payload } = event.data.data;
+    const { payload } = event.data.data;
 
-    log('WebSocket message from page:', payload);
+    // Check for Zendesk custom WebSocket protocol (not GraphQL)
+    if (payload && payload.type) {
+      const msgType = payload.type;
+      const status = payload.status || '';
+      const value = payload.value || {};
 
-    if (operationName) {
-      checkAndTrackReply(operationName, variables);
-    } else {
-      // Log messages without operationName for debugging
-      log('WebSocket message without operationName:', payload);
+      // Log for debugging
+      if (DEBUG_MODE && msgType !== 'PING' && msgType !== 'PONG') {
+        log('WebSocket message:', { type: msgType, status });
+      }
+
+      // Check if this is a ticket update/submission message
+      // Look for messages with specific status patterns
+      if (msgType === 'call' && status.includes('/tickets/')) {
+        log('Ticket interaction detected:', { type: msgType, status, value });
+
+        // Check for completion/submission indicators in the status
+        // "beginPath" = start of edit (don't track)
+        // "commitPath" = submission (track this!)
+        // "endPath" = end of operation (possibly track)
+
+        if (status.includes('commitPath') || status.includes('endPath') || status.includes('submit')) {
+          log('Ticket submission detected - tracking reply');
+          trackMetric('reply');
+        } else if (status.includes('beginPath')) {
+          log('Ticket edit started (not submission) - not tracking');
+        } else {
+          log('Unknown ticket operation:', status);
+        }
+      }
+    }
+
+    // Also check for standard GraphQL format (fallback)
+    if (payload && payload.operationName) {
+      checkAndTrackReply(payload.operationName, payload.variables);
     }
   }
 });
