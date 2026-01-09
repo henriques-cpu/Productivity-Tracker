@@ -792,53 +792,72 @@ window.addEventListener('message', (event) => {
   // Only accept messages from same window
   if (event.source !== window) return;
 
+  // Handle GraphQL requests from fetch
   if (event.data.type === 'ZKT_GRAPHQL_REQUEST') {
     const { operationName, variables } = event.data.data;
 
     log('GraphQL request from page:', { operationName, variables });
 
-    // Check if this is a reply operation
-    const replyOperations = [
-      'sendmessage',
-      'createmessage',
-      'addcomment',
-      'createcomment',
-      'submitticket',
-      'updateticket',
-      'sendreply',
-      'createreply',
-    ];
+    checkAndTrackReply(operationName, variables);
+  }
 
-    const isReplyOperation = replyOperations.some(op =>
-      operationName.toLowerCase().includes(op)
-    );
+  // Handle WebSocket messages
+  if (event.data.type === 'ZKT_WEBSOCKET_MESSAGE') {
+    const { operationName, variables, payload } = event.data.data;
 
-    if (isReplyOperation) {
-      log('Reply operation detected:', { operationName, variables });
+    log('WebSocket message from page:', { operationName, variables, payload });
 
-      // Check if public
-      const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
-      let isPublic = true; // Default to public
-
-      if (message) {
-        if (message.isPublic !== undefined) {
-          isPublic = message.isPublic === true;
-        } else if (message.public !== undefined) {
-          isPublic = message.public === true;
-        } else if (message.isInternal !== undefined) {
-          isPublic = message.isInternal === false;
-        }
-      }
-
-      if (isPublic) {
-        log('Public reply detected - tracking');
-        trackMetric('reply');
-      } else {
-        log('Internal note detected - not tracking');
-      }
+    if (operationName) {
+      checkAndTrackReply(operationName, variables);
     }
   }
 });
+
+/**
+ * Check if operation is a reply and track if public
+ */
+function checkAndTrackReply(operationName, variables) {
+  // Check if this is a reply operation
+  const replyOperations = [
+    'sendmessage',
+    'createmessage',
+    'addcomment',
+    'createcomment',
+    'submitticket',
+    'updateticket',
+    'sendreply',
+    'createreply',
+  ];
+
+  const isReplyOperation = replyOperations.some(op =>
+    operationName.toLowerCase().includes(op)
+  );
+
+  if (isReplyOperation) {
+    log('Reply operation detected:', { operationName, variables });
+
+    // Check if public
+    const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
+    let isPublic = true; // Default to public
+
+    if (message) {
+      if (message.isPublic !== undefined) {
+        isPublic = message.isPublic === true;
+      } else if (message.public !== undefined) {
+        isPublic = message.public === true;
+      } else if (message.isInternal !== undefined) {
+        isPublic = message.isInternal === false;
+      }
+    }
+
+    if (isPublic) {
+      log('Public reply detected - tracking');
+      trackMetric('reply');
+    } else {
+      log('Internal note detected - not tracking');
+    }
+  }
+}
 
 // ============================================================================
 // INITIALIZATION

@@ -2,13 +2,16 @@
  * Zendesk KPI Tracker - Injected Script (runs in page context)
  *
  * This script runs in the page's main world (not the isolated content script world)
- * so it can intercept fetch calls made by Zendesk's code.
+ * so it can intercept fetch calls and WebSocket connections made by Zendesk's code.
  */
 
 (function() {
-  console.log('[ZKT Injected] Starting fetch/XHR interception in page context');
+  console.log('[ZKT Injected] Starting fetch/XHR and WebSocket interception in page context');
 
-  // Intercept fetch
+  // ============================================================================
+  // INTERCEPT FETCH
+  // ============================================================================
+
   const originalFetch = window.fetch;
 
   window.fetch = function(...args) {
@@ -41,5 +44,57 @@
     return originalFetch.apply(this, args);
   };
 
-  console.log('[ZKT Injected] Fetch interception installed successfully');
+  console.log('[ZKT Injected] Fetch interception installed');
+
+  // ============================================================================
+  // INTERCEPT WEBSOCKET
+  // ============================================================================
+
+  const OriginalWebSocket = window.WebSocket;
+
+  window.WebSocket = function(url, protocols) {
+    console.log('[ZKT Injected] WebSocket connection:', url);
+
+    const ws = new OriginalWebSocket(url, protocols);
+
+    // Intercept sent messages
+    const originalSend = ws.send;
+    ws.send = function(data) {
+      console.log('[ZKT Injected] WebSocket message sent:', data);
+
+      // Try to parse as JSON and look for GraphQL operations
+      try {
+        const parsed = JSON.parse(data);
+
+        // Check if this looks like a GraphQL operation
+        if (parsed.operationName || parsed.query || parsed.mutation) {
+          window.postMessage({
+            type: 'ZKT_WEBSOCKET_MESSAGE',
+            data: {
+              operationName: parsed.operationName,
+              variables: parsed.variables,
+              query: parsed.query,
+              mutation: parsed.mutation,
+              payload: parsed
+            }
+          }, '*');
+        }
+      } catch (e) {
+        // Not JSON or parsing error, ignore
+      }
+
+      return originalSend.apply(this, arguments);
+    };
+
+    return ws;
+  };
+
+  // Copy static properties
+  window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+  window.WebSocket.OPEN = OriginalWebSocket.OPEN;
+  window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
+  window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
+
+  console.log('[ZKT Injected] WebSocket interception installed');
+  console.log('[ZKT Injected] All interception successfully installed');
 })();
