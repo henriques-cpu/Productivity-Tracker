@@ -363,6 +363,14 @@ async function resetToday() {
 }
 
 // ============================================================================
+// DASHBOARD
+// ============================================================================
+
+function openDashboard() {
+  chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') });
+}
+
+// ============================================================================
 // SETTINGS MODAL
 // ============================================================================
 
@@ -410,6 +418,9 @@ function setupEventListeners() {
 
   // Reset button
   document.getElementById('resetBtn')?.addEventListener('click', resetToday);
+
+  // Dashboard button
+  document.getElementById('openDashboardBtn')?.addEventListener('click', openDashboard);
 
   // Settings
   document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
