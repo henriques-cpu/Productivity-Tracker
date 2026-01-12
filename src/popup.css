@@ -157,6 +157,47 @@ body {
   background: var(--status-error);
 }
 
+/* Dashboard Button */
+.dashboard-btn {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent-blue), #4a8cc7);
+  color: white;
+  border: none;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  transition: var(--transition-normal);
+  margin-bottom: var(--spacing-md);
+  box-shadow: var(--shadow-card);
+}
+
+.dashboard-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+  background: linear-gradient(135deg, #4a8cc7, var(--accent-blue));
+}
+
+.dashboard-btn:active {
+  transform: translateY(0);
+}
+
+.dashboard-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dashboard-btn .arrow-icon {
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
