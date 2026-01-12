@@ -813,6 +813,12 @@ function analyzeGraphQLResponse(response, requestBody) {
     log('Could not parse GraphQL request body');
   }
 
+  // SPECIAL CASE: BFFConvoLogQuery returns conversation events after submission
+  // This is Zendesk Agent Workspace's way of showing the conversation log
+  if (operationName === 'BFFConvoLogQuery') {
+    return analyzeBFFConvoLogResponse(response);
+  }
+
   // Check if operation is a reply/comment operation
   const replyOperations = [
     'sendmessage', 'createmessage', 'addcomment', 'createcomment',
@@ -878,6 +884,72 @@ function analyzeGraphQLResponse(response, requestBody) {
   // If we can't determine from response or request, check UI state
   log('Could not determine public flag from response or request, checking UI');
   return isPublicReplyMode();
+}
+
+/**
+ * Analyze BFFConvoLogQuery response (Zendesk Agent Workspace conversation log)
+ * This query returns conversation events, including newly added messages
+ */
+function analyzeBFFConvoLogResponse(response) {
+  const ticket = response?.data?.ticket;
+  if (!ticket) {
+    return false;
+  }
+
+  const conversationEvents = ticket.conversationEvents;
+  if (!conversationEvents || !conversationEvents.edges || conversationEvents.edges.length === 0) {
+    return false;
+  }
+
+  // Get the most recent event (first in the array, since they're sorted by timestamp descending)
+  const mostRecentEdge = conversationEvents.edges[0];
+  const event = mostRecentEdge?.node;
+
+  if (!event) {
+    return false;
+  }
+
+  // Check timestamp - only track if message is very recent (within last 10 seconds)
+  // This prevents tracking old messages when refreshing or navigating
+  const eventTimestamp = new Date(event.timestamp).getTime();
+  const now = Date.now();
+  const ageInSeconds = (now - eventTimestamp) / 1000;
+
+  log('BFFConvoLogQuery: Checking most recent event:', {
+    id: event.id,
+    typename: event.__typename,
+    actor: event.actor?.name,
+    actorRole: event.actor?.role,
+    ageInSeconds: ageInSeconds.toFixed(1)
+  });
+
+  // Only process very recent events (within 10 seconds)
+  if (ageInSeconds > 10) {
+    log('BFFConvoLogQuery: Event too old, not tracking');
+    return false;
+  }
+
+  // Check if this is a public message from an agent
+  const isPublicMessage = event.__typename === 'PublicMessage';
+  const isInternalNote = event.__typename === 'InternalNote';
+  const isAgentMessage = event.actor?.role === 'AGENT';
+
+  // Only track if:
+  // 1. It's a PublicMessage (not InternalNote)
+  // 2. It's from an Agent (not a Customer)
+  // 3. Event is recent (checked above)
+  if (isPublicMessage && isAgentMessage) {
+    log('✓ BFFConvoLogQuery: Public message from agent detected');
+    return true;
+  }
+
+  if (isInternalNote) {
+    log('✗ BFFConvoLogQuery: Internal note detected');
+    return false;
+  }
+
+  log('BFFConvoLogQuery: Not a trackable message');
+  return false;
 }
 
 /**
