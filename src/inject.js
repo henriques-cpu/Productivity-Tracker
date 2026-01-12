@@ -21,30 +21,115 @@
 
     console.log('[ZKT Injected] Fetch intercepted:', url, method);
 
-    // Send message to content script about GraphQL requests
-    if (method === 'POST' && url.includes('/api/graphql')) {
-      const body = config?.body;
-      try {
-        const data = JSON.parse(body);
-        window.postMessage({
-          type: 'ZKT_GRAPHQL_REQUEST',
-          data: {
-            url,
-            method,
-            operationName: data.operationName,
-            variables: data.variables
-          }
-        }, '*');
-      } catch (e) {
-        // Ignore parse errors
-        console.log('[ZKT Injected] Error parsing GraphQL body:', e);
-      }
+    // Call original fetch
+    const promise = originalFetch.apply(this, args);
+
+    // Intercept response for ticket/comment operations
+    if (method === 'POST' && (
+      url.includes('/api/graphql') ||
+      url.includes('/api/v2/tickets') ||
+      url.includes('/api/lotus/tickets') ||
+      url.includes('/api/v2/any_channel/tickets') ||
+      url.includes('/api/v2/channels/voice/tickets')
+    )) {
+      promise.then(async (response) => {
+        // Only process successful responses
+        if (!response.ok) {
+          console.log('[ZKT Injected] Request failed, not tracking:', response.status);
+          return response;
+        }
+
+        // Clone response so we can read it without consuming the original
+        const clonedResponse = response.clone();
+
+        try {
+          const responseData = await clonedResponse.json();
+          console.log('[ZKT Injected] Response data:', responseData);
+
+          // Send response to content script for analysis
+          window.postMessage({
+            type: 'ZKT_API_RESPONSE',
+            data: {
+              url,
+              method,
+              status: response.status,
+              response: responseData,
+              requestBody: config?.body
+            }
+          }, '*');
+        } catch (e) {
+          console.log('[ZKT Injected] Error parsing response:', e);
+        }
+
+        return response;
+      }).catch(err => {
+        console.log('[ZKT Injected] Fetch error:', err);
+        throw err;
+      });
     }
 
-    return originalFetch.apply(this, args);
+    return promise;
   };
 
   console.log('[ZKT Injected] Fetch interception installed');
+
+  // ============================================================================
+  // INTERCEPT XMLHttpRequest (for REST APIs)
+  // ============================================================================
+
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const originalXHRSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    this._zkt_method = method;
+    this._zkt_url = url;
+    return originalXHROpen.apply(this, [method, url, ...rest]);
+  };
+
+  XMLHttpRequest.prototype.send = function(body) {
+    const method = this._zkt_method;
+    const url = this._zkt_url;
+
+    // Store request body
+    this._zkt_body = body;
+
+    console.log('[ZKT Injected] XHR intercepted:', url, method);
+
+    // Listen for response
+    if (method === 'POST' && (
+      url.includes('/api/v2/tickets') ||
+      url.includes('/api/lotus/tickets') ||
+      url.includes('/api/v2/any_channel/tickets') ||
+      url.includes('/api/v2/channels/voice/tickets')
+    )) {
+      this.addEventListener('load', function() {
+        if (this.status >= 200 && this.status < 300) {
+          try {
+            const responseData = JSON.parse(this.responseText);
+            console.log('[ZKT Injected] XHR Response data:', responseData);
+
+            // Send response to content script
+            window.postMessage({
+              type: 'ZKT_API_RESPONSE',
+              data: {
+                url,
+                method,
+                status: this.status,
+                response: responseData,
+                requestBody: this._zkt_body
+              }
+            }, '*');
+          } catch (e) {
+            console.log('[ZKT Injected] Error parsing XHR response:', e);
+          }
+        }
+      });
+    }
+
+    return originalXHRSend.apply(this, arguments);
+  };
+
+  console.log('[ZKT Injected] XHR interception installed');
 
   // ============================================================================
   // INTERCEPT WEBSOCKET

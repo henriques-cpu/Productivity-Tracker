@@ -276,84 +276,10 @@ function isPublicReplyRequest(url, method, payload) {
   }
 }
 
-/**
- * Intercept fetch() calls
- */
-function interceptFetch() {
-  const originalFetch = window.fetch;
-
-  if (!originalFetch) {
-    log('ERROR: window.fetch is not available!');
-    return;
-  }
-
-  window.fetch = function(...args) {
-    const [resource, config] = args;
-    const url = typeof resource === 'string' ? resource : resource.url;
-    const method = config?.method || 'GET';
-    const body = config?.body;
-
-    if (DEBUG_MODE) {
-      log('Fetch intercepted:', { url, method });
-    }
-
-    // Check if this is a public reply submission
-    const isPublic = isPublicReplyRequest(url, method.toUpperCase(), body);
-
-    // Call original fetch
-    const promise = originalFetch.apply(this, args);
-
-    // Track successful public replies
-    if (isPublic) {
-      promise.then(response => {
-        if (response.ok) {
-          log('Public reply sent via fetch');
-          trackMetric('reply');
-        }
-      }).catch(() => {
-        // Ignore errors (reply failed, don't track)
-      });
-    }
-
-    return promise;
-  };
-
-  log('Fetch interception installed successfully');
-}
-
-/**
- * Intercept XMLHttpRequest calls
- */
-function interceptXHR() {
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-
-  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-    this._method = method;
-    this._url = url;
-    return originalOpen.apply(this, [method, url, ...rest]);
-  };
-
-  XMLHttpRequest.prototype.send = function(body) {
-    const method = this._method;
-    const url = this._url;
-
-    // Check if this is a public reply submission
-    const isPublic = isPublicReplyRequest(url, method, body);
-
-    if (isPublic) {
-      // Listen for successful completion
-      this.addEventListener('load', function() {
-        if (this.status >= 200 && this.status < 300) {
-          log('Public reply sent via XHR');
-          trackMetric('reply');
-        }
-      });
-    }
-
-    return originalSend.apply(this, arguments);
-  };
-}
+// NOTE: Fetch and XHR interception is now handled in inject.js (runs in page context)
+// Content scripts run in an isolated world and cannot intercept page-level fetch/XHR calls
+// The inject.js script intercepts responses (more reliable than requests) and forwards
+// them via postMessage to this content script for analysis.
 
 /**
  * Check if element matches any selector in list
@@ -653,6 +579,10 @@ function setupMutationObserver() {
           state.lastCallDirection = 'inbound';
           state.isCallActive = true;
         }
+
+        // DOM OBSERVATION: Check for newly added comments/replies (FALLBACK detection)
+        // This provides visual confirmation that a reply was actually submitted
+        detectNewReplyInDOM(node);
       }
     }
   });
@@ -664,6 +594,63 @@ function setupMutationObserver() {
 
   log('MutationObserver started');
   return observer;
+}
+
+/**
+ * Detect newly added reply/comment elements in DOM (fallback detection method)
+ * This runs when the mutation observer detects new DOM nodes
+ */
+function detectNewReplyInDOM(node) {
+  // Check if this node or any child is a comment/event element
+  // Common selectors for Zendesk Agent Workspace comments:
+  // - [data-test-id*="comment"]
+  // - [data-test-id*="event"]
+  // - [data-garden-id*="typography.paragraph"] (comment text)
+  // - Elements with class containing "event" or "comment"
+
+  const isCommentElement = node.matches?.(
+    '[data-test-id*="comment"], ' +
+    '[data-test-id*="event"], ' +
+    '[data-test-id*="ticket-event"], ' +
+    '[class*="Comment"], ' +
+    '[class*="Event"]'
+  );
+
+  // Also check children
+  const hasCommentChild = node.querySelector?.(
+    '[data-test-id*="comment"], ' +
+    '[data-test-id*="event"], ' +
+    '[data-test-id*="ticket-event"]'
+  );
+
+  if (isCommentElement || hasCommentChild) {
+    const commentNode = isCommentElement ? node : hasCommentChild;
+
+    // Check if this is an internal note (has "Internal" badge)
+    const hasInternalBadge = commentNode.textContent?.includes('Internal') ||
+                             commentNode.querySelector?.('[data-test-id*="internal"]') ||
+                             commentNode.querySelector?.('[aria-label*="Internal"]');
+
+    // Check if this is an agent comment (not customer message)
+    // Look for agent avatar indicators or "Henrique" (agent name from screenshot)
+    const isAgentComment = commentNode.querySelector?.(
+      '[data-test-id*="agent"], ' +
+      '[data-test-id*="author"], ' +
+      '[class*="Agent"]'
+    );
+
+    // Only track if it's an agent comment and NOT internal
+    if (isAgentComment && !hasInternalBadge) {
+      // Use a small delay to avoid double-counting with API detection
+      setTimeout(() => {
+        log('DOM: New public reply element detected (fallback confirmation)');
+        // Don't track here - API response detection should handle it
+        // This is just for logging/debugging
+      }, 100);
+    } else if (hasInternalBadge) {
+      log('DOM: Internal note detected - not tracking');
+    }
+  }
 }
 
 // ============================================================================
@@ -785,6 +772,162 @@ function injectInterceptionScript() {
 injectInterceptionScript();
 
 // ============================================================================
+// API RESPONSE ANALYSIS
+// ============================================================================
+
+/**
+ * Analyze API response to detect public reply submissions
+ * This is the PRIMARY detection method - analyzing actual server responses
+ * is more reliable than analyzing requests.
+ */
+function analyzeApiResponse(url, response, requestBody) {
+  // GraphQL API responses
+  if (url.includes('/api/graphql')) {
+    return analyzeGraphQLResponse(response, requestBody);
+  }
+
+  // REST API responses
+  if (url.includes('/api/v2/tickets') ||
+      url.includes('/api/lotus/tickets') ||
+      url.includes('/api/v2/any_channel/tickets') ||
+      url.includes('/api/v2/channels/voice/tickets')) {
+    return analyzeRestApiResponse(response, requestBody);
+  }
+
+  return false;
+}
+
+/**
+ * Analyze GraphQL API response
+ */
+function analyzeGraphQLResponse(response, requestBody) {
+  // Parse request to understand what was sent
+  let operationName = '';
+  let requestVariables = {};
+
+  try {
+    const request = JSON.parse(requestBody);
+    operationName = request.operationName || '';
+    requestVariables = request.variables || {};
+  } catch (e) {
+    log('Could not parse GraphQL request body');
+  }
+
+  // Check if operation is a reply/comment operation
+  const replyOperations = [
+    'sendmessage', 'createmessage', 'addcomment', 'createcomment',
+    'submitticket', 'updateticket', 'sendreply', 'createreply'
+  ];
+
+  const isReplyOperation = replyOperations.some(op =>
+    operationName.toLowerCase().includes(op)
+  );
+
+  if (!isReplyOperation) {
+    return false;
+  }
+
+  log('Reply operation detected in response:', operationName);
+
+  // Check response data for public flag
+  // GraphQL responses typically have: { data: { operationName: { ... } } }
+  const data = response?.data;
+  if (!data) {
+    log('No data in GraphQL response');
+    return false;
+  }
+
+  // Look through response data for comment/message objects
+  const findPublicFlag = (obj) => {
+    if (!obj || typeof obj !== 'object') return null;
+
+    // Check common field names
+    if (obj.public !== undefined) return obj.public;
+    if (obj.isPublic !== undefined) return obj.isPublic;
+    if (obj.isInternal !== undefined) return !obj.isInternal;
+
+    // Check nested objects
+    for (const value of Object.values(obj)) {
+      const result = findPublicFlag(value);
+      if (result !== null) return result;
+    }
+
+    return null;
+  };
+
+  const isPublic = findPublicFlag(data);
+
+  // If we found a public flag in response, use it
+  if (isPublic !== null) {
+    log(`Reply public flag from response: ${isPublic}`);
+    return isPublic === true;
+  }
+
+  // Fallback: check request variables
+  const message = requestVariables?.message ||
+                  requestVariables?.comment ||
+                  requestVariables?.input?.message ||
+                  requestVariables?.input?.comment;
+
+  if (message) {
+    if (message.isPublic !== undefined) return message.isPublic === true;
+    if (message.public !== undefined) return message.public === true;
+    if (message.isInternal !== undefined) return message.isInternal === false;
+  }
+
+  // If we can't determine from response or request, check UI state
+  log('Could not determine public flag from response or request, checking UI');
+  return isPublicReplyMode();
+}
+
+/**
+ * Analyze REST API response
+ */
+function analyzeRestApiResponse(response, requestBody) {
+  // REST API endpoint: /api/v2/tickets/{id}/comments
+  // Check if URL contains /comments or /comment
+
+  // Parse request body
+  let requestData = {};
+  try {
+    requestData = JSON.parse(requestBody);
+  } catch (e) {
+    log('Could not parse REST request body');
+  }
+
+  // Response typically contains: { comment: { id, type, public, body, ... } }
+  const comment = response?.comment || response?.ticket?.latest_comment;
+
+  if (comment) {
+    log('Comment found in REST response:', comment);
+
+    // Check public flag in response (most reliable)
+    if (comment.public !== undefined) {
+      log(`Comment public flag: ${comment.public}`);
+      return comment.public === true;
+    }
+
+    // Check type field (some endpoints use this)
+    if (comment.type) {
+      const isPublic = comment.type === 'Comment' || comment.type === 'public';
+      log(`Comment type: ${comment.type} (public: ${isPublic})`);
+      return isPublic;
+    }
+  }
+
+  // Fallback: check request body
+  const reqComment = requestData?.comment;
+  if (reqComment?.public !== undefined) {
+    log(`Using request public flag: ${reqComment.public}`);
+    return reqComment.public === true;
+  }
+
+  // Last resort: check UI state
+  log('Could not determine public flag from REST response, checking UI');
+  return isPublicReplyMode();
+}
+
+// ============================================================================
 // LISTEN FOR MESSAGES FROM INJECTED SCRIPT
 // ============================================================================
 
@@ -792,7 +935,20 @@ window.addEventListener('message', (event) => {
   // Only accept messages from same window
   if (event.source !== window) return;
 
-  // Handle GraphQL requests from fetch
+  // Handle API responses (PRIMARY detection method - most reliable!)
+  if (event.data.type === 'ZKT_API_RESPONSE') {
+    const { url, response, requestBody } = event.data.data;
+    log('API Response intercepted:', { url, response });
+
+    // Analyze response to detect public reply submissions
+    const replyDetected = analyzeApiResponse(url, response, requestBody);
+    if (replyDetected) {
+      log('✓ Public reply confirmed via response - tracking');
+      trackMetric('reply');
+    }
+  }
+
+  // Handle GraphQL requests from fetch (FALLBACK - less reliable)
   if (event.data.type === 'ZKT_GRAPHQL_REQUEST') {
     const { operationName, variables } = event.data.data;
 
@@ -801,7 +957,7 @@ window.addEventListener('message', (event) => {
     checkAndTrackReply(operationName, variables);
   }
 
-  // Handle WebSocket messages
+  // Handle WebSocket messages (FALLBACK - less reliable)
   if (event.data.type === 'ZKT_WEBSOCKET_MESSAGE') {
     const { payload } = event.data.data;
 
@@ -825,10 +981,18 @@ window.addEventListener('message', (event) => {
         // "beginPath" = start of edit (don't track)
         // "commitPath" = submission (track this!)
         // "endPath" = end of operation (possibly track)
+        // "submit" = submission (track this!)
 
         if (status.includes('commitPath') || status.includes('endPath') || status.includes('submit')) {
-          log('Ticket submission detected - tracking reply');
-          trackMetric('reply');
+          // CRITICAL FIX: Check if reply mode is public before tracking
+          const isPublicMode = isPublicReplyMode();
+
+          if (isPublicMode) {
+            log('✓ Public ticket submission via WebSocket - tracking');
+            trackMetric('reply');
+          } else {
+            log('✗ Internal note via WebSocket - not tracking');
+          }
         } else if (status.includes('beginPath')) {
           log('Ticket edit started (not submission) - not tracking');
         } else {
