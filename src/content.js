@@ -45,6 +45,7 @@ const SELECTORS = {
   PUBLIC_REPLY_INDICATORS: [
     'Public reply',
     'Email',
+    'SMS',
     'Web',
     'Chat',
     'Messaging',
@@ -126,7 +127,13 @@ function getTodayDateString() {
 function createEmptyMetrics() {
   return {
     date: getTodayDateString(),
-    reply: 0,
+    reply: 0, // Keep for backwards compatibility and total count
+    replyEmail: 0,
+    replySMS: 0,
+    replyWeb: 0,
+    replyMessaging: 0,
+    replyChat: 0,
+    replyOther: 0,
     chat: 0,
     inbound: 0,
     outbound: 0,
@@ -307,7 +314,8 @@ function matchesTextPattern(element, patterns) {
 
 /**
  * Check if the composer is in "Public reply" mode (not internal note)
- * Returns true if it's a public reply, false if it's an internal note
+ * Returns object with isPublic flag and channel type
+ * @returns {{isPublic: boolean, channel?: string}} Reply mode info
  */
 function isPublicReplyMode() {
   // Find the channel switcher button
@@ -316,7 +324,7 @@ function isPublicReplyMode() {
   if (!channelSwitcher) {
     // If no channel switcher found, assume it's a reply (older Zendesk UI)
     log('No channel switcher found, assuming public reply');
-    return true;
+    return { isPublic: true, channel: 'other' };
   }
 
   // Check the aria-label to determine the current mode
@@ -330,32 +338,48 @@ function isPublicReplyMode() {
   // Check if it's internal note mode
   if (ariaLabel.toLowerCase().includes('internal') || dataChannel === 'internal') {
     log('Internal note mode detected - NOT tracking as reply');
-    return false;
+    return { isPublic: false };
+  }
+
+  // Detect specific channel type from aria-label
+  const ariaLabelLower = ariaLabel.toLowerCase();
+  let channel = 'other';
+
+  if (ariaLabelLower.includes('email')) {
+    channel = 'email';
+  } else if (ariaLabelLower.includes('sms')) {
+    channel = 'sms';
+  } else if (ariaLabelLower.includes('web')) {
+    channel = 'web';
+  } else if (ariaLabelLower.includes('messaging')) {
+    channel = 'messaging';
+  } else if (ariaLabelLower.includes('chat')) {
+    channel = 'chat';
   }
 
   // Check if it matches any public reply indicator
   const isPublic = SELECTORS.PUBLIC_REPLY_INDICATORS.some(
-    indicator => ariaLabel.toLowerCase().includes(indicator.toLowerCase())
+    indicator => ariaLabelLower.includes(indicator.toLowerCase())
   );
 
   if (isPublic) {
-    log('Public reply mode detected');
-    return true;
+    log(`Public reply mode detected - Channel: ${channel}`);
+    return { isPublic: true, channel };
   }
 
   // Default: if we can't determine, don't track (safer)
   log('Could not determine reply mode, not tracking');
-  return false;
+  return { isPublic: false };
 }
 
 // ============================================================================
 // STORAGE FUNCTIONS (Direct storage access for reliability)
 // ============================================================================
 
-async function trackMetric(metricType) {
+async function trackMetric(metricType, channel = null) {
   if (shouldDebounce(metricType)) return;
 
-  log(`Tracking: ${metricType}`);
+  log(`Tracking: ${metricType}${channel ? ` (${channel})` : ''}`);
 
   try {
     // Get current metrics from storage
@@ -372,6 +396,12 @@ async function trackMetric(metricType) {
         history.push({
           date: metrics.date,
           reply: metrics.reply || 0,
+          replyEmail: metrics.replyEmail || 0,
+          replySMS: metrics.replySMS || 0,
+          replyWeb: metrics.replyWeb || 0,
+          replyMessaging: metrics.replyMessaging || 0,
+          replyChat: metrics.replyChat || 0,
+          replyOther: metrics.replyOther || 0,
           chat: metrics.chat || 0,
           inbound: metrics.inbound || 0,
           outbound: metrics.outbound || 0,
@@ -385,6 +415,16 @@ async function trackMetric(metricType) {
     // Increment the metric
     if (metrics[metricType] !== undefined) {
       metrics[metricType]++;
+
+      // If tracking a reply with channel info, also increment channel-specific counter
+      if (metricType === 'reply' && channel) {
+        const channelKey = `reply${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
+        if (metrics[channelKey] !== undefined) {
+          metrics[channelKey]++;
+          log(`Tracked ${channelKey}:`, metrics[channelKey]);
+        }
+      }
+
       metrics.lastUpdated = Date.now();
       await chrome.storage.local.set({ metrics });
 
@@ -1016,7 +1056,9 @@ window.addEventListener('message', (event) => {
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
       log('✓ Public reply confirmed via response - tracking');
-      trackMetric('reply');
+      // Get channel information from the UI
+      const replyMode = isPublicReplyMode();
+      trackMetric('reply', replyMode.channel);
     }
   }
 
@@ -1057,11 +1099,11 @@ window.addEventListener('message', (event) => {
 
         if (status.includes('commitPath') || status.includes('endPath') || status.includes('submit')) {
           // CRITICAL FIX: Check if reply mode is public before tracking
-          const isPublicMode = isPublicReplyMode();
+          const replyMode = isPublicReplyMode();
 
-          if (isPublicMode) {
-            log('✓ Public ticket submission via WebSocket - tracking');
-            trackMetric('reply');
+          if (replyMode.isPublic) {
+            log(`✓ Public ticket submission via WebSocket (${replyMode.channel}) - tracking`);
+            trackMetric('reply', replyMode.channel);
           } else {
             log('✗ Internal note via WebSocket - not tracking');
           }
@@ -1119,7 +1161,9 @@ function checkAndTrackReply(operationName, variables) {
 
     if (isPublic) {
       log('Public reply detected - tracking');
-      trackMetric('reply');
+      // Get channel information from the UI
+      const replyMode = isPublicReplyMode();
+      trackMetric('reply', replyMode.channel);
     } else {
       log('Internal note detected - not tracking');
     }
