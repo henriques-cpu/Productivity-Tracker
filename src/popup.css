@@ -157,6 +157,79 @@ body {
   background: var(--status-error);
 }
 
+/* Tracking Toggle */
+.tracking-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-left: auto;
+}
+
+.toggle-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 70px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--bg-hover);
+  transition: var(--transition-normal);
+  border-radius: 20px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--text-muted);
+  transition: var(--transition-normal);
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--status-success);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+  background-color: white;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider {
+  background-color: var(--status-error);
+}
+
+.tracking-toggle .toggle-label.tracking-on {
+  color: var(--status-success);
+}
+
+.tracking-toggle .toggle-label.tracking-off {
+  color: var(--status-error);
+}
+
 /* Dashboard Button */
 .dashboard-btn {
   width: 100%;
