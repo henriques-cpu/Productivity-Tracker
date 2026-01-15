@@ -130,10 +130,8 @@ function createEmptyMetrics() {
     reply: 0, // Keep for backwards compatibility and total count
     replyEmail: 0,
     replySMS: 0,
-    replyWeb: 0,
     replyMessaging: 0,
     replyChat: 0,
-    replyOther: 0,
     chat: 0,
     inbound: 0,
     outbound: 0,
@@ -324,7 +322,7 @@ function isPublicReplyMode() {
   if (!channelSwitcher) {
     // If no channel switcher found, assume it's a reply (older Zendesk UI)
     log('No channel switcher found, assuming public reply');
-    return { isPublic: true, channel: 'other' };
+    return { isPublic: true, channel: null };
   }
 
   // Check the aria-label to determine the current mode
@@ -341,16 +339,14 @@ function isPublicReplyMode() {
     return { isPublic: false };
   }
 
-  // Detect specific channel type from aria-label
+  // Detect specific channel type from aria-label (only track: email, sms, messaging, chat)
   const ariaLabelLower = ariaLabel.toLowerCase();
-  let channel = 'other';
+  let channel = null;
 
   if (ariaLabelLower.includes('email')) {
     channel = 'email';
   } else if (ariaLabelLower.includes('sms')) {
     channel = 'sms';
-  } else if (ariaLabelLower.includes('web')) {
-    channel = 'web';
   } else if (ariaLabelLower.includes('messaging')) {
     channel = 'messaging';
   } else if (ariaLabelLower.includes('chat')) {
@@ -363,7 +359,7 @@ function isPublicReplyMode() {
   );
 
   if (isPublic) {
-    log(`Public reply mode detected - Channel: ${channel}`);
+    log(`Public reply mode detected - Channel: ${channel || 'untracked'}`);
     return { isPublic: true, channel };
   }
 
@@ -398,10 +394,8 @@ async function trackMetric(metricType, channel = null) {
           reply: metrics.reply || 0,
           replyEmail: metrics.replyEmail || 0,
           replySMS: metrics.replySMS || 0,
-          replyWeb: metrics.replyWeb || 0,
           replyMessaging: metrics.replyMessaging || 0,
           replyChat: metrics.replyChat || 0,
-          replyOther: metrics.replyOther || 0,
           chat: metrics.chat || 0,
           inbound: metrics.inbound || 0,
           outbound: metrics.outbound || 0,

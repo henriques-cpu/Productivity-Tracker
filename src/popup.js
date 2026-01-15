@@ -38,10 +38,8 @@ function createEmptyMetrics() {
     reply: 0, // Keep for backwards compatibility and total count
     replyEmail: 0,
     replySMS: 0,
-    replyWeb: 0,
     replyMessaging: 0,
     replyChat: 0,
-    replyOther: 0,
     chat: 0,
     inbound: 0,
     outbound: 0,
@@ -69,10 +67,8 @@ async function loadFromStorage() {
             reply: metrics.reply || 0,
             replyEmail: metrics.replyEmail || 0,
             replySMS: metrics.replySMS || 0,
-            replyWeb: metrics.replyWeb || 0,
             replyMessaging: metrics.replyMessaging || 0,
             replyChat: metrics.replyChat || 0,
-            replyOther: metrics.replyOther || 0,
             chat: metrics.chat || 0,
             inbound: metrics.inbound || 0,
             outbound: metrics.outbound || 0,
@@ -193,7 +189,7 @@ function updateScorecards(metrics) {
 }
 
 function updateChannelBreakdown(metrics) {
-  const channels = ['Email', 'SMS', 'Web', 'Messaging', 'Chat', 'Other'];
+  const channels = ['Email', 'SMS', 'Messaging', 'Chat'];
 
   channels.forEach(channel => {
     const key = `reply${channel}`;
@@ -343,7 +339,7 @@ async function exportToCSV() {
   }
   allData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const headers = ['Date', 'Replies (Total)', 'Email', 'SMS', 'Web', 'Messaging', 'Chat', 'Other', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
+  const headers = ['Date', 'Replies (Total)', 'Email', 'SMS', 'Messaging', 'Chat', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
   const rows = allData.map((day) => {
     const total = (day.reply || 0) + (day.chat || 0) + (day.inbound || 0) + (day.outbound || 0);
     return [
@@ -351,10 +347,8 @@ async function exportToCSV() {
       day.reply || 0,
       day.replyEmail || 0,
       day.replySMS || 0,
-      day.replyWeb || 0,
       day.replyMessaging || 0,
       day.replyChat || 0,
-      day.replyOther || 0,
       day.chat || 0,
       day.inbound || 0,
       day.outbound || 0,
@@ -367,19 +361,17 @@ async function exportToCSV() {
       reply: acc.reply + (day.reply || 0),
       replyEmail: acc.replyEmail + (day.replyEmail || 0),
       replySMS: acc.replySMS + (day.replySMS || 0),
-      replyWeb: acc.replyWeb + (day.replyWeb || 0),
       replyMessaging: acc.replyMessaging + (day.replyMessaging || 0),
       replyChat: acc.replyChat + (day.replyChat || 0),
-      replyOther: acc.replyOther + (day.replyOther || 0),
       chat: acc.chat + (day.chat || 0),
       inbound: acc.inbound + (day.inbound || 0),
       outbound: acc.outbound + (day.outbound || 0),
     }),
-    { reply: 0, replyEmail: 0, replySMS: 0, replyWeb: 0, replyMessaging: 0, replyChat: 0, replyOther: 0, chat: 0, inbound: 0, outbound: 0 }
+    { reply: 0, replyEmail: 0, replySMS: 0, replyMessaging: 0, replyChat: 0, chat: 0, inbound: 0, outbound: 0 }
   );
 
   rows.push([]);
-  rows.push(['TOTAL', totals.reply, totals.replyEmail, totals.replySMS, totals.replyWeb, totals.replyMessaging, totals.replyChat, totals.replyOther, totals.chat, totals.inbound, totals.outbound,
+  rows.push(['TOTAL', totals.reply, totals.replyEmail, totals.replySMS, totals.replyMessaging, totals.replyChat, totals.chat, totals.inbound, totals.outbound,
     totals.reply + totals.chat + totals.inbound + totals.outbound]);
 
   const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
