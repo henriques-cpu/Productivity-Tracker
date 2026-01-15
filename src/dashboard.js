@@ -12,10 +12,10 @@ let charts = {};
 
 // Color Palette
 const COLORS = {
-  reply: '#5b9bd5',
-  chat: '#70ad47',
-  inbound: '#ed7d31',
-  outbound: '#7030a0',
+  reply: '#5046e5',
+  chat: '#059669',
+  inbound: '#d97706',
+  outbound: '#7b1fa2',
   grid: '#3d3d3d',
   text: '#b3b3b3'
 };

@@ -7,6 +7,36 @@
    CSS Variables - Power BI Color Palette
    ============================================ */
 :root {
+  /* Primary */
+  --primary: #7b1fa2;
+  --primary-hover: #6a1b9a;
+  --primary-light: #9c27b0;
+  --primary-tint: #f3e5f5;
+  --primary-border: #ce93d8;
+  --primary-text: #4a148c;
+
+  /* Secondary */
+  --secondary: #5046e5;
+  --secondary-hover: #4338ca;
+  --secondary-tint: #eef0ff;
+  --secondary-border: #c7d2fe;
+
+  /* Gradient */
+  --gradient-bg: linear-gradient(135deg, #7b1fa2 0%, #1a237e 100%);
+  --gradient-btn: linear-gradient(135deg, #7b1fa2 0%, #9c27b0 100%);
+
+  /* Status */
+  --success: #059669;
+  --success-bg: #ecfdf5;
+  --error: #dc2626;
+  --error-bg: #fef2f2;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+
+  /* Shadows */
+  --shadow-primary: rgba(123, 31, 162, 0.15);
+  --shadow-primary-hover: rgba(123, 31, 162, 0.3);
+
   /* Background Colors */
   --bg-primary: #1b1b1b;
   --bg-secondary: #252525;
@@ -18,28 +48,28 @@
   --text-secondary: #a0a0a0;
   --text-muted: #6b6b6b;
 
-  /* Accent Colors */
-  --accent-blue: #5b9bd5;
-  --accent-green: #70ad47;
-  --accent-orange: #ed7d31;
-  --accent-purple: #7030a0;
-  --accent-yellow: #ffc000;
+  /* Accent Colors - updated to match new scheme */
+  --accent-blue: #5046e5;
+  --accent-green: #059669;
+  --accent-orange: #d97706;
+  --accent-purple: #7b1fa2;
+  --accent-yellow: #fbbf24;
 
-  /* Metric Colors */
-  --color-replies: #5b9bd5;
-  --color-chats: #70ad47;
-  --color-inbound: #ed7d31;
-  --color-outbound: #7030a0;
+  /* Metric Colors - updated to match new scheme */
+  --color-replies: #5046e5;
+  --color-chats: #059669;
+  --color-inbound: #d97706;
+  --color-outbound: #7b1fa2;
 
   /* Status Colors */
-  --status-success: #70ad47;
-  --status-warning: #ffc000;
-  --status-error: #c00000;
+  --status-success: #059669;
+  --status-warning: #d97706;
+  --status-error: #dc2626;
 
   /* Borders & Shadows */
   --border-color: #404040;
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 2px 8px var(--shadow-primary);
+  --shadow-hover: 0 4px 16px var(--shadow-primary-hover);
 
   /* Spacing */
   --spacing-xs: 4px;
