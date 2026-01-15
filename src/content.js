@@ -455,7 +455,7 @@ function showNotification(metricType) {
       position: fixed;
       bottom: 20px;
       right: 20px;
-      background: linear-gradient(135deg, #10b981, #059669);
+      background: linear-gradient(135deg, #7b1fa2, #9c27b0);
       color: white;
       padding: 12px 20px;
       border-radius: 8px;

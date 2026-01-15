@@ -124,7 +124,7 @@ function updateBadge(metrics) {
 
   if (total > 0) {
     chrome.action.setBadgeText({ text: total.toString() });
-    chrome.action.setBadgeBackgroundColor({ color: '#70ad47' });
+    chrome.action.setBadgeBackgroundColor({ color: '#059669' });
   } else {
     chrome.action.setBadgeText({ text: '' });
   }
