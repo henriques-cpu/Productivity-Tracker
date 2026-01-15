@@ -117,12 +117,6 @@
                             </svg>
                         </div>
                         <div class="card-value" id="todayChat">0</div>
-                        <div class="card-footer">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressChat" style="width: 0%"></div>
-                            </div>
-                            <span class="card-goal">Goal: <span id="goalChat">15</span></span>
-                        </div>
                         <div class="card-change" id="changeChat">+0 from yesterday</div>
                     </div>
 
@@ -134,12 +128,6 @@
                             </svg>
                         </div>
                         <div class="card-value" id="todayInbound">0</div>
-                        <div class="card-footer">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressInbound" style="width: 0%"></div>
-                            </div>
-                            <span class="card-goal">Goal: <span id="goalInbound">10</span></span>
-                        </div>
                         <div class="card-change" id="changeInbound">+0 from yesterday</div>
                     </div>
 
@@ -153,12 +141,6 @@
                             </svg>
                         </div>
                         <div class="card-value" id="todayOutbound">0</div>
-                        <div class="card-footer">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressOutbound" style="width: 0%"></div>
-                            </div>
-                            <span class="card-goal">Goal: <span id="goalOutbound">5</span></span>
-                        </div>
                         <div class="card-change" id="changeOutbound">+0 from yesterday</div>
                     </div>
                 </div>
@@ -167,7 +149,7 @@
             <!-- Summary Statistics -->
             <section class="dashboard-section">
                 <h2 class="section-title">Summary Statistics</h2>
-                <div class="cards-grid-5">
+                <div class="cards-grid-4">
                     <div class="stat-card">
                         <div class="stat-label">Total Activities</div>
                         <div class="stat-value" id="totalActivities">0</div>
@@ -182,11 +164,6 @@
                         <div class="stat-label">Best Day</div>
                         <div class="stat-value" id="bestDayValue">0</div>
                         <div class="stat-subtitle" id="bestDayDate">--</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Current Streak</div>
-                        <div class="stat-value" id="currentStreak">0</div>
-                        <div class="stat-subtitle">days</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Goal Achievement</div>
@@ -450,24 +427,6 @@
                             <span class="goal-icon">📧</span> Replies Goal
                         </label>
                         <input type="number" id="goalReplyInput" min="0" max="100" value="20">
-                    </div>
-                    <div class="settings-group">
-                        <label for="goalChatInput">
-                            <span class="goal-icon">💬</span> Chats Goal
-                        </label>
-                        <input type="number" id="goalChatInput" min="0" max="100" value="15">
-                    </div>
-                    <div class="settings-group">
-                        <label for="goalInboundInput">
-                            <span class="goal-icon">📞</span> Inbound Calls Goal
-                        </label>
-                        <input type="number" id="goalInboundInput" min="0" max="100" value="10">
-                    </div>
-                    <div class="settings-group">
-                        <label for="goalOutboundInput">
-                            <span class="goal-icon">📲</span> Outbound Calls Goal
-                        </label>
-                        <input type="number" id="goalOutboundInput" min="0" max="100" value="5">
                     </div>
                 </div>
             </div>

@@ -5,7 +5,7 @@
 let currentData = {
   metrics: { date: '', reply: 0, chat: 0, inbound: 0, outbound: 0 },
   history: [],
-  goals: { reply: 20, chat: 15, inbound: 10, outbound: 5 }
+  goals: { reply: 20 }
 };
 let currentRange = 7;
 let charts = {};
@@ -68,7 +68,7 @@ async function loadData() {
 
     currentData.metrics = result.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0 };
     currentData.history = result.history || [];
-    currentData.goals = result.goals || { reply: 20, chat: 15, inbound: 10, outbound: 5 };
+    currentData.goals = result.goals || { reply: 20 };
 
     updateLastUpdated();
     renderDashboard();
@@ -107,9 +107,9 @@ function renderOverviewTab() {
 
   // Today's Performance Cards
   updateMetricCard('reply', metrics.reply, goals.reply, yesterday.reply);
-  updateMetricCard('chat', metrics.chat, goals.chat, yesterday.chat);
-  updateMetricCard('inbound', metrics.inbound, goals.inbound, yesterday.inbound);
-  updateMetricCard('outbound', metrics.outbound, goals.outbound, yesterday.outbound);
+  updateMetricCardNoGoal('chat', metrics.chat, yesterday.chat);
+  updateMetricCardNoGoal('inbound', metrics.inbound, yesterday.inbound);
+  updateMetricCardNoGoal('outbound', metrics.outbound, yesterday.outbound);
 
   // Summary Statistics
   updateSummaryStats();
@@ -136,12 +136,24 @@ function updateMetricCard(metric, value, goal, yesterdayValue) {
   changeEl.className = `card-change ${changeClass}`;
 }
 
+function updateMetricCardNoGoal(metric, value, yesterdayValue) {
+  const capitalMetric = metric.charAt(0).toUpperCase() + metric.slice(1);
+  const change = value - yesterdayValue;
+  const changeText = change >= 0 ? `+${change}` : `${change}`;
+  const changeClass = change >= 0 ? 'positive' : 'negative';
+
+  document.getElementById(`today${capitalMetric}`).textContent = value;
+
+  const changeEl = document.getElementById(`change${capitalMetric}`);
+  changeEl.textContent = `${changeText} from yesterday`;
+  changeEl.className = `card-change ${changeClass}`;
+}
+
 function updateSummaryStats() {
   const rangeData = getRangeData(currentRange);
-  const total = rangeData.reduce((sum, day) => sum + day.reply + day.chat + day.inbound + day.outbound, 0);
+  const total = rangeData.reduce((sum, day) => sum + day.reply, 0);
   const avg = rangeData.length > 0 ? (total / rangeData.length).toFixed(1) : 0;
   const bestDay = findBestDay(rangeData);
-  const streak = calculateStreak();
   const goalRate = calculateGoalAchievementRate(rangeData);
 
   document.getElementById('rangeDays').textContent = currentRange;
@@ -149,7 +161,6 @@ function updateSummaryStats() {
   document.getElementById('dailyAverage').textContent = avg;
   document.getElementById('bestDayValue').textContent = bestDay.total;
   document.getElementById('bestDayDate').textContent = bestDay.date;
-  document.getElementById('currentStreak').textContent = streak;
   document.getElementById('goalAchievement').textContent = `${goalRate}%`;
 }
 
@@ -227,30 +238,36 @@ function createIndividualTrendCharts() {
 
     destroyChart(`${metric}TrendChart`);
 
+    const datasets = [
+      {
+        label: labels[metric],
+        data: data,
+        borderColor: COLORS[metric],
+        backgroundColor: COLORS[metric] + '33',
+        tension: 0.4,
+        fill: true,
+        borderWidth: 3
+      }
+    ];
+
+    // Only add goal line for replies
+    if (metric === 'reply' && goal) {
+      datasets.push({
+        label: 'Goal',
+        data: Array(chartLabels.length).fill(goal),
+        borderColor: '#ffffff',
+        borderDash: [5, 5],
+        borderWidth: 2,
+        fill: false,
+        pointRadius: 0
+      });
+    }
+
     charts[`${metric}TrendChart`] = new Chart(ctx, {
       type: 'line',
       data: {
         labels: chartLabels,
-        datasets: [
-          {
-            label: labels[metric],
-            data: data,
-            borderColor: COLORS[metric],
-            backgroundColor: COLORS[metric] + '33',
-            tension: 0.4,
-            fill: true,
-            borderWidth: 3
-          },
-          {
-            label: 'Goal',
-            data: Array(chartLabels.length).fill(goal),
-            borderColor: '#ffffff',
-            borderDash: [5, 5],
-            borderWidth: 2,
-            fill: false,
-            pointRadius: 0
-          }
-        ]
+        datasets: datasets
       },
       options: getLineChartOptions(labels[metric])
     });
@@ -317,11 +334,10 @@ function renderInsights() {
   // Goal Success Rate
   document.getElementById('goalSuccessRate').textContent = `${goalRate}%`;
   const daysMetGoal = rangeData.filter(day => {
-    const { reply, chat, inbound, outbound } = day;
     const { goals } = currentData;
-    return reply >= goals.reply || chat >= goals.chat || inbound >= goals.inbound || outbound >= goals.outbound;
+    return day.reply >= goals.reply;
   }).length;
-  document.getElementById('goalSuccessDesc').textContent = `${daysMetGoal} of ${rangeData.length} days met at least one goal`;
+  document.getElementById('goalSuccessDesc').textContent = `${daysMetGoal} of ${rangeData.length} days met reply goal`;
 
   // Performance Trend
   document.getElementById('performanceTrend').textContent = trend.direction;
@@ -546,7 +562,7 @@ function createTodayVsGoalChart() {
         },
         {
           label: 'Goal',
-          data: [goals.reply, goals.chat, goals.inbound, goals.outbound],
+          data: [goals.reply, null, null, null],
           backgroundColor: 'transparent',
           borderColor: '#ffffff',
           borderWidth: 2,
@@ -605,54 +621,38 @@ function createGoalCompletionChart() {
   if (!ctx) return;
 
   const { metrics, goals } = currentData;
-  const completions = [
-    (metrics.reply / goals.reply) * 100,
-    (metrics.chat / goals.chat) * 100,
-    (metrics.inbound / goals.inbound) * 100,
-    (metrics.outbound / goals.outbound) * 100
-  ];
+  const replyCompletion = (metrics.reply / goals.reply) * 100;
 
   destroyChart('goalCompletionChart');
 
   charts.goalCompletionChart = new Chart(ctx, {
-    type: 'radar',
+    type: 'doughnut',
     data: {
-      labels: ['Replies', 'Chats', 'Inbound', 'Outbound'],
+      labels: ['Completed', 'Remaining'],
       datasets: [{
-        label: 'Goal Completion %',
-        data: completions,
-        backgroundColor: COLORS.reply + '33',
-        borderColor: COLORS.reply,
+        data: [Math.min(replyCompletion, 100), Math.max(100 - replyCompletion, 0)],
+        backgroundColor: [COLORS.reply, '#3d3d3d'],
         borderWidth: 2,
-        pointBackgroundColor: COLORS.reply,
-        pointBorderColor: '#fff',
-        pointHoverBackgroundColor: '#fff',
-        pointHoverBorderColor: COLORS.reply
+        borderColor: '#2d2d2d'
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: true,
-      scales: {
-        r: {
-          beginAtZero: true,
-          max: 150,
-          ticks: {
-            stepSize: 25,
-            color: COLORS.text,
-            backdropColor: 'transparent'
-          },
-          grid: { color: COLORS.grid },
-          pointLabels: { color: COLORS.text, font: { size: 12 } }
-        }
-      },
       plugins: {
         legend: {
-          labels: { color: COLORS.text, font: { size: 12 } }
+          position: 'bottom',
+          labels: { color: COLORS.text, padding: 15, font: { size: 12 } }
         },
         tooltip: {
           callbacks: {
-            label: (context) => `${context.parsed.r.toFixed(1)}% complete`
+            label: (context) => {
+              if (context.dataIndex === 0) {
+                return `${replyCompletion.toFixed(1)}% of goal (${metrics.reply}/${goals.reply})`;
+              } else {
+                return `${(100 - replyCompletion).toFixed(1)}% remaining`;
+              }
+            }
           }
         }
       }
@@ -852,52 +852,18 @@ function findBestDay(data) {
   return withTotals.reduce((best, current) => current.total > best.total ? current : best);
 }
 
-function calculateStreak() {
-  const sortedData = [...currentData.history].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  // Include today if it has any activity
-  if (currentData.metrics.date === getTodayDate()) {
-    const todayTotal = currentData.metrics.reply + currentData.metrics.chat +
-                       currentData.metrics.inbound + currentData.metrics.outbound;
-    if (todayTotal > 0) {
-      sortedData.unshift(currentData.metrics);
-    }
-  }
-
-  let streak = 0;
-  let expectedDate = new Date();
-
-  for (const day of sortedData) {
-    const dayDate = new Date(day.date);
-    const total = day.reply + day.chat + day.inbound + day.outbound;
-
-    if (total > 0 && isSameDay(dayDate, expectedDate)) {
-      streak++;
-      expectedDate.setDate(expectedDate.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-
-  return streak;
-}
-
 function calculateGoalAchievementRate(data) {
   if (data.length === 0) return 0;
 
   const { goals } = currentData;
-  let totalGoals = 0;
+  let totalDays = data.length;
   let metGoals = 0;
 
   data.forEach(day => {
     if (day.reply >= goals.reply) metGoals++;
-    if (day.chat >= goals.chat) metGoals++;
-    if (day.inbound >= goals.inbound) metGoals++;
-    if (day.outbound >= goals.outbound) metGoals++;
-    totalGoals += 4;
   });
 
-  return totalGoals > 0 ? Math.round((metGoals / totalGoals) * 100) : 0;
+  return totalDays > 0 ? Math.round((metGoals / totalDays) * 100) : 0;
 }
 
 function calculateTrend(data) {
@@ -979,9 +945,6 @@ function changeDateRange(days) {
 function openSettings() {
   const { goals } = currentData;
   document.getElementById('goalReplyInput').value = goals.reply;
-  document.getElementById('goalChatInput').value = goals.chat;
-  document.getElementById('goalInboundInput').value = goals.inbound;
-  document.getElementById('goalOutboundInput').value = goals.outbound;
   document.getElementById('settingsModal').classList.add('active');
 }
 
@@ -991,10 +954,7 @@ function closeSettings() {
 
 async function saveSettings() {
   const newGoals = {
-    reply: parseInt(document.getElementById('goalReplyInput').value),
-    chat: parseInt(document.getElementById('goalChatInput').value),
-    inbound: parseInt(document.getElementById('goalInboundInput').value),
-    outbound: parseInt(document.getElementById('goalOutboundInput').value)
+    reply: parseInt(document.getElementById('goalReplyInput').value)
   };
 
   try {
