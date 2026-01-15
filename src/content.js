@@ -372,6 +372,15 @@ function isPublicReplyMode() {
 async function trackMetric(metricType, channel = null) {
   if (shouldDebounce(metricType)) return;
 
+  // Check if tracking is enabled
+  const trackingState = await chrome.storage.local.get(['trackingEnabled']);
+  const isTrackingEnabled = trackingState.trackingEnabled !== false; // Default to true
+
+  if (!isTrackingEnabled) {
+    log(`Tracking is disabled - skipping ${metricType}`);
+    return;
+  }
+
   log(`Tracking: ${metricType}${channel ? ` (${channel})` : ''}`);
 
   try {

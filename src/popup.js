@@ -397,6 +397,49 @@ async function resetToday() {
 }
 
 // ============================================================================
+// TRACKING TOGGLE
+// ============================================================================
+
+async function loadTrackingState() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['trackingEnabled'], (result) => {
+      // Default to true (tracking enabled)
+      resolve(result.trackingEnabled !== false);
+    });
+  });
+}
+
+async function saveTrackingState(enabled) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ trackingEnabled: enabled }, resolve);
+  });
+}
+
+async function updateTrackingUI(enabled) {
+  const toggle = document.getElementById('trackingToggle');
+  const label = document.getElementById('trackingLabel');
+
+  if (toggle) {
+    toggle.checked = enabled;
+  }
+
+  if (label) {
+    label.textContent = enabled ? 'Tracking ON' : 'Tracking OFF';
+    label.className = enabled ? 'toggle-label tracking-on' : 'toggle-label tracking-off';
+  }
+}
+
+async function handleTrackingToggle() {
+  const toggle = document.getElementById('trackingToggle');
+  const enabled = toggle?.checked || false;
+
+  await saveTrackingState(enabled);
+  updateTrackingUI(enabled);
+
+  console.log('[ZKT] Tracking', enabled ? 'enabled' : 'disabled');
+}
+
+// ============================================================================
 // DASHBOARD
 // ============================================================================
 
@@ -456,6 +499,9 @@ function setupEventListeners() {
   // Dashboard button
   document.getElementById('openDashboardBtn')?.addEventListener('click', openDashboard);
 
+  // Tracking toggle
+  document.getElementById('trackingToggle')?.addEventListener('change', handleTrackingToggle);
+
   // Settings
   document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
   document.getElementById('closeSettings')?.addEventListener('click', closeSettings);
@@ -491,6 +537,10 @@ async function init() {
 
     console.log('[ZKT] Loaded metrics:', currentMetrics);
     console.log('[ZKT] Loaded goals:', goals);
+
+    // Load tracking state
+    const trackingEnabled = await loadTrackingState();
+    updateTrackingUI(trackingEnabled);
 
     // Setup UI
     setupEventListeners();
