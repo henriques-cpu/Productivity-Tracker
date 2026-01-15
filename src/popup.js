@@ -35,7 +35,10 @@ function calculateProgress(current, goal) {
 function createEmptyMetrics() {
   return {
     date: getTodayDateString(),
-    reply: 0,
+    reply: 0, // Keep for backwards compatibility and total count
+    replyEmail: 0,
+    replySMS: 0,
+    replyChat: 0,
     chat: 0,
     inbound: 0,
     outbound: 0,
@@ -61,6 +64,9 @@ async function loadFromStorage() {
           history.push({
             date: metrics.date,
             reply: metrics.reply || 0,
+            replyEmail: metrics.replyEmail || 0,
+            replySMS: metrics.replySMS || 0,
+            replyChat: metrics.replyChat || 0,
             chat: metrics.chat || 0,
             inbound: metrics.inbound || 0,
             outbound: metrics.outbound || 0,
@@ -175,6 +181,21 @@ function updateScorecards(metrics) {
   updateScorecard('chats', metrics.chat || 0, goals.chat);
   updateScorecard('inbound', metrics.inbound || 0, goals.inbound);
   updateScorecard('outbound', metrics.outbound || 0, goals.outbound);
+
+  // Update reply channel breakdown
+  updateChannelBreakdown(metrics);
+}
+
+function updateChannelBreakdown(metrics) {
+  const channels = ['Email', 'SMS', 'Chat'];
+
+  channels.forEach(channel => {
+    const key = `reply${channel}`;
+    const el = document.getElementById(`${key}Count`);
+    if (el) {
+      el.textContent = metrics[key] || 0;
+    }
+  });
 }
 
 function updateScorecard(type, count, goal) {
@@ -316,24 +337,37 @@ async function exportToCSV() {
   }
   allData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const headers = ['Date', 'Replies Sent', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
+  const headers = ['Date', 'Replies (Total)', 'Email', 'SMS', 'Chat', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
   const rows = allData.map((day) => {
     const total = (day.reply || 0) + (day.chat || 0) + (day.inbound || 0) + (day.outbound || 0);
-    return [day.date, day.reply || 0, day.chat || 0, day.inbound || 0, day.outbound || 0, total];
+    return [
+      day.date,
+      day.reply || 0,
+      day.replyEmail || 0,
+      day.replySMS || 0,
+      day.replyChat || 0,
+      day.chat || 0,
+      day.inbound || 0,
+      day.outbound || 0,
+      total
+    ];
   });
 
   const totals = allData.reduce(
     (acc, day) => ({
       reply: acc.reply + (day.reply || 0),
+      replyEmail: acc.replyEmail + (day.replyEmail || 0),
+      replySMS: acc.replySMS + (day.replySMS || 0),
+      replyChat: acc.replyChat + (day.replyChat || 0),
       chat: acc.chat + (day.chat || 0),
       inbound: acc.inbound + (day.inbound || 0),
       outbound: acc.outbound + (day.outbound || 0),
     }),
-    { reply: 0, chat: 0, inbound: 0, outbound: 0 }
+    { reply: 0, replyEmail: 0, replySMS: 0, replyChat: 0, chat: 0, inbound: 0, outbound: 0 }
   );
 
   rows.push([]);
-  rows.push(['TOTAL', totals.reply, totals.chat, totals.inbound, totals.outbound,
+  rows.push(['TOTAL', totals.reply, totals.replyEmail, totals.replySMS, totals.replyChat, totals.chat, totals.inbound, totals.outbound,
     totals.reply + totals.chat + totals.inbound + totals.outbound]);
 
   const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');

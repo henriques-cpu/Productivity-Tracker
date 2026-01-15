@@ -307,6 +307,36 @@ body {
 .scorecard.inbound .scorecard-value { color: var(--color-inbound); }
 .scorecard.outbound .scorecard-value { color: var(--color-outbound); }
 
+.scorecard-breakdown {
+  margin: var(--spacing-sm) 0;
+  padding: var(--spacing-sm);
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-xs);
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  padding: 2px 0;
+}
+
+.breakdown-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.breakdown-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  min-width: 20px;
+  text-align: right;
+}
+
 .scorecard-goal {
   font-size: 11px;
   color: var(--text-muted);
