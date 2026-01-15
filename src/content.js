@@ -130,7 +130,6 @@ function createEmptyMetrics() {
     reply: 0, // Keep for backwards compatibility and total count
     replyEmail: 0,
     replySMS: 0,
-    replyMessaging: 0,
     replyChat: 0,
     chat: 0,
     inbound: 0,
@@ -339,7 +338,7 @@ function isPublicReplyMode() {
     return { isPublic: false };
   }
 
-  // Detect specific channel type from aria-label (only track: email, sms, messaging, chat)
+  // Detect specific channel type from aria-label (only track: email, sms, chat)
   const ariaLabelLower = ariaLabel.toLowerCase();
   let channel = null;
 
@@ -347,8 +346,6 @@ function isPublicReplyMode() {
     channel = 'email';
   } else if (ariaLabelLower.includes('sms')) {
     channel = 'sms';
-  } else if (ariaLabelLower.includes('messaging')) {
-    channel = 'messaging';
   } else if (ariaLabelLower.includes('chat')) {
     channel = 'chat';
   }
@@ -394,7 +391,6 @@ async function trackMetric(metricType, channel = null) {
           reply: metrics.reply || 0,
           replyEmail: metrics.replyEmail || 0,
           replySMS: metrics.replySMS || 0,
-          replyMessaging: metrics.replyMessaging || 0,
           replyChat: metrics.replyChat || 0,
           chat: metrics.chat || 0,
           inbound: metrics.inbound || 0,
