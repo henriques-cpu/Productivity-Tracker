@@ -1057,6 +1057,7 @@ window.addEventListener('message', (event) => {
       log('✓ Public reply confirmed via response - tracking');
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
+      log('Channel detection result:', replyMode);
       trackMetric('reply', replyMode.channel);
     }
   }
