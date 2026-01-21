@@ -62,19 +62,62 @@ if (!channelSwitcher) {
   const isInternal = ariaLabelLower.includes('internal') || dataChannel === 'internal';
   console.log('  Is Internal Note?', isInternal);
 
-  // Check for channel type
+  // Check for channel type using NEW detection logic
   let channel = null;
+  console.log('\n  🆕 NEW DETECTION (using data-channel attribute):');
+
+  // Priority 1: Use data-channel attribute (more reliable)
+  if (dataChannel) {
+    const dataChannelLower = dataChannel.toLowerCase();
+    if (dataChannelLower === 'sms') {
+      channel = 'sms';
+      console.log('    ✅ Detected as: SMS (data-channel="sms")');
+    } else if (dataChannelLower === 'web' || dataChannelLower === 'email') {
+      channel = 'email';
+      console.log('    ✅ Detected as: EMAIL (data-channel="' + dataChannelLower + '")');
+    } else if (dataChannelLower === 'native_messaging' || dataChannelLower === 'chat') {
+      channel = 'chat';
+      console.log('    ✅ Detected as: CHAT (data-channel="' + dataChannelLower + '")');
+    } else {
+      console.log('    ⚠️ Unrecognized data-channel: "' + dataChannel + '"');
+    }
+  }
+
+  // Priority 2: Fallback to aria-label if data-channel didn't match
+  if (!channel) {
+    console.log('    Falling back to aria-label detection...');
+    if (ariaLabelLower.includes('email')) {
+      channel = 'email';
+      console.log('    ✅ Detected as: EMAIL (aria-label contains "email")');
+    } else if (ariaLabelLower.includes('sms')) {
+      channel = 'sms';
+      console.log('    ✅ Detected as: SMS (aria-label contains "sms")');
+    } else if (ariaLabelLower.includes('chat') || ariaLabelLower.includes('messaging')) {
+      channel = 'chat';
+      console.log('    ✅ Detected as: CHAT (aria-label contains "chat" or "messaging")');
+    } else {
+      console.log('    ⚠️ Not detected as email/sms/chat');
+    }
+  }
+
+  // OLD detection logic for comparison
+  console.log('\n  ⚠️ OLD DETECTION (aria-label only - for comparison):');
+  let oldChannel = null;
   if (ariaLabelLower.includes('email')) {
-    channel = 'email';
-    console.log('  ✅ Detected as: EMAIL (aria-label contains "email")');
+    oldChannel = 'email';
+    console.log('    Would detect as: EMAIL');
   } else if (ariaLabelLower.includes('sms')) {
-    channel = 'sms';
-    console.log('  ✅ Detected as: SMS (aria-label contains "sms")');
+    oldChannel = 'sms';
+    console.log('    Would detect as: SMS');
   } else if (ariaLabelLower.includes('chat')) {
-    channel = 'chat';
-    console.log('  ✅ Detected as: CHAT (aria-label contains "chat")');
+    oldChannel = 'chat';
+    console.log('    Would detect as: CHAT');
   } else {
-    console.log('  ⚠️ Not detected as email/sms/chat');
+    console.log('    Would NOT detect channel (null)');
+  }
+
+  if (oldChannel !== channel) {
+    console.log('    🔄 Detection changed! Old: ' + (oldChannel || 'null') + ' → New: ' + (channel || 'null'));
   }
 
   // Check if it matches public reply indicators
@@ -106,26 +149,22 @@ if (!channelSwitcher) {
   console.log('\n🔧 HTML ELEMENT:');
   console.log(channelSwitcher.outerHTML);
 
-  // Check if the problem is substring matching
-  console.log('\n🐛 POTENTIAL ISSUES:');
-  if (channel === 'chat') {
-    console.log('  ⚠️ Detected as CHAT. Checking if "chat" appears in unexpected places:');
-    console.log('    - Full aria-label:', `"${ariaLabel}"`);
-    console.log('    - Does it contain "email"?', ariaLabelLower.includes('email'));
-    console.log('    - Does it contain "sms"?', ariaLabelLower.includes('sms'));
-    console.log('    - Does it contain "chat"?', ariaLabelLower.includes('chat'));
-
-    // Check if "chat" appears as part of a larger word
-    const words = ariaLabelLower.split(/\s+/);
-    const chatAsWord = words.some(w => w === 'chat' || w.startsWith('chat'));
-    console.log('    - "chat" appears as a word?', chatAsWord);
-    console.log('    - All words:', words);
-  }
+  // Summary
+  console.log('\n✅ DETECTION SUMMARY:');
+  console.log('  The extension now uses data-channel as the primary detection method,');
+  console.log('  which is more reliable than aria-label after Zendesk UI updates.');
+  console.log('\n  Mappings:');
+  console.log('    data-channel="web"              → Email');
+  console.log('    data-channel="email"            → Email');
+  console.log('    data-channel="sms"              → SMS');
+  console.log('    data-channel="native_messaging" → Chat');
+  console.log('    data-channel="chat"             → Chat');
 }
 
 console.log('\n' + '='.repeat(60));
 console.log('💡 INSTRUCTIONS:');
-console.log('  1. Run this script on DIFFERENT ticket types');
-console.log('  2. Compare the aria-label values');
-console.log('  3. Share the output to diagnose the issue');
+console.log('  1. Run this script on different ticket types to verify the fix');
+console.log('  2. Check that "NEW DETECTION" correctly identifies each channel');
+console.log('  3. Compare with "OLD DETECTION" to see what changed');
+console.log('  4. Reload the extension after deploying the fix');
 console.log('='.repeat(60));

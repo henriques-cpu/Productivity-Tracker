@@ -338,16 +338,31 @@ function isPublicReplyMode() {
     return { isPublic: false };
   }
 
-  // Detect specific channel type from aria-label (only track: email, sms, chat)
+  // Detect specific channel type from data-channel attribute (primary) or aria-label (fallback)
   const ariaLabelLower = ariaLabel.toLowerCase();
   let channel = null;
 
-  if (ariaLabelLower.includes('email')) {
-    channel = 'email';
-  } else if (ariaLabelLower.includes('sms')) {
-    channel = 'sms';
-  } else if (ariaLabelLower.includes('chat')) {
-    channel = 'chat';
+  // Priority 1: Use data-channel attribute (more reliable after Zendesk UI updates)
+  if (dataChannel) {
+    const dataChannelLower = dataChannel.toLowerCase();
+    if (dataChannelLower === 'sms') {
+      channel = 'sms';
+    } else if (dataChannelLower === 'web' || dataChannelLower === 'email') {
+      channel = 'email';
+    } else if (dataChannelLower === 'native_messaging' || dataChannelLower === 'chat') {
+      channel = 'chat';
+    }
+  }
+
+  // Priority 2: Fallback to aria-label if data-channel didn't match
+  if (!channel) {
+    if (ariaLabelLower.includes('email')) {
+      channel = 'email';
+    } else if (ariaLabelLower.includes('sms')) {
+      channel = 'sms';
+    } else if (ariaLabelLower.includes('chat') || ariaLabelLower.includes('messaging')) {
+      channel = 'chat';
+    }
   }
 
   // Check if it matches any public reply indicator
