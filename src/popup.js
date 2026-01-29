@@ -115,14 +115,40 @@ async function trackMetric(metricType) {
     updateChart(currentMetrics);
 
     // Show feedback
-    showFeedback(`+1 ${metricType}`);
+    showFeedback(metricType, '+1');
     console.log('[ZKT] Metric tracked:', metricType, '=', currentMetrics[metricType]);
   }
 }
 
-function showFeedback(message) {
+async function decrementMetric(metricType) {
+  console.log('[ZKT] Decrementing metric:', metricType);
+
+  const data = await loadFromStorage();
+  currentMetrics = data.metrics;
+
+  // Decrement the metric (but don't go below 0)
+  if (currentMetrics[metricType] !== undefined && currentMetrics[metricType] > 0) {
+    currentMetrics[metricType]--;
+    await saveMetrics(currentMetrics);
+
+    // Update UI immediately
+    updateScorecards(currentMetrics);
+    updateChart(currentMetrics);
+
+    // Show feedback
+    showFeedback(metricType, '-1');
+    console.log('[ZKT] Metric decremented:', metricType, '=', currentMetrics[metricType]);
+  } else if (currentMetrics[metricType] === 0) {
+    // Show feedback that we can't go below 0
+    showFeedback(metricType, '0');
+    console.log('[ZKT] Cannot decrement below 0:', metricType);
+  }
+}
+
+function showFeedback(metricType, change) {
   // Brief visual feedback on the button
-  const btn = document.querySelector(`[data-metric="${message.split(' ')[1]}"]`);
+  const isAdd = change.startsWith('+');
+  const btn = document.querySelector(`.${isAdd ? 'add' : 'subtract'}-btn[data-metric="${metricType}"]`);
   if (btn) {
     btn.style.transform = 'scale(0.95)';
     setTimeout(() => {
@@ -479,13 +505,24 @@ async function handleSaveSettings() {
 // ============================================================================
 
 function setupEventListeners() {
-  // Manual tracking buttons
-  document.querySelectorAll('.manual-btn').forEach((btn) => {
+  // Add buttons (increment)
+  document.querySelectorAll('.add-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       const metric = btn.dataset.metric;
       if (metric) {
         trackMetric(metric);
+      }
+    });
+  });
+
+  // Subtract buttons (decrement)
+  document.querySelectorAll('.subtract-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const metric = btn.dataset.metric;
+      if (metric) {
+        decrementMetric(metric);
       }
     });
   });

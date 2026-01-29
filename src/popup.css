@@ -497,61 +497,117 @@ body {
   gap: var(--spacing-sm);
 }
 
-.manual-btn {
+.metric-control {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: var(--spacing-xs);
   padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+}
+
+.metric-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.metric-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.add-btn,
+.subtract-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 10px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text-primary);
   transition: var(--transition-fast);
 }
 
-.manual-btn .btn-icon {
-  font-size: 16px;
-  font-weight: 700;
+.add-btn:active,
+.subtract-btn:active {
+  transform: scale(0.95);
 }
 
-.manual-btn.replies {
-  background: rgba(91, 155, 213, 0.2);
+/* Replies buttons */
+.metric-control.replies {
+  background: rgba(91, 155, 213, 0.1);
   border: 1px solid var(--color-replies);
 }
-.manual-btn.replies:hover {
+.metric-control.replies .add-btn {
+  background: rgba(91, 155, 213, 0.3);
+}
+.metric-control.replies .add-btn:hover {
+  background: rgba(91, 155, 213, 0.5);
+}
+.metric-control.replies .subtract-btn {
+  background: rgba(91, 155, 213, 0.15);
+}
+.metric-control.replies .subtract-btn:hover {
   background: rgba(91, 155, 213, 0.3);
 }
 
-.manual-btn.chats {
-  background: rgba(112, 173, 71, 0.2);
+/* Chats buttons */
+.metric-control.chats {
+  background: rgba(112, 173, 71, 0.1);
   border: 1px solid var(--color-chats);
 }
-.manual-btn.chats:hover {
+.metric-control.chats .add-btn {
+  background: rgba(112, 173, 71, 0.3);
+}
+.metric-control.chats .add-btn:hover {
+  background: rgba(112, 173, 71, 0.5);
+}
+.metric-control.chats .subtract-btn {
+  background: rgba(112, 173, 71, 0.15);
+}
+.metric-control.chats .subtract-btn:hover {
   background: rgba(112, 173, 71, 0.3);
 }
 
-.manual-btn.inbound {
-  background: rgba(237, 125, 49, 0.2);
+/* Inbound buttons */
+.metric-control.inbound {
+  background: rgba(237, 125, 49, 0.1);
   border: 1px solid var(--color-inbound);
 }
-.manual-btn.inbound:hover {
+.metric-control.inbound .add-btn {
+  background: rgba(237, 125, 49, 0.3);
+}
+.metric-control.inbound .add-btn:hover {
+  background: rgba(237, 125, 49, 0.5);
+}
+.metric-control.inbound .subtract-btn {
+  background: rgba(237, 125, 49, 0.15);
+}
+.metric-control.inbound .subtract-btn:hover {
   background: rgba(237, 125, 49, 0.3);
 }
 
-.manual-btn.outbound {
-  background: rgba(112, 48, 160, 0.2);
+/* Outbound buttons */
+.metric-control.outbound {
+  background: rgba(112, 48, 160, 0.1);
   border: 1px solid var(--color-outbound);
 }
-.manual-btn.outbound:hover {
+.metric-control.outbound .add-btn {
   background: rgba(112, 48, 160, 0.3);
 }
-
-.manual-btn:active {
-  transform: scale(0.95);
+.metric-control.outbound .add-btn:hover {
+  background: rgba(112, 48, 160, 0.5);
+}
+.metric-control.outbound .subtract-btn {
+  background: rgba(112, 48, 160, 0.15);
+}
+.metric-control.outbound .subtract-btn:hover {
+  background: rgba(112, 48, 160, 0.3);
 }
 
 /* ============================================
