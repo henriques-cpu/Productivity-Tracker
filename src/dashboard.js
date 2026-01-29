@@ -770,8 +770,9 @@ function getMonthData(year, month) {
 
   return allData
     .filter(d => {
-      const date = new Date(d.date);
-      return date.getFullYear() === year && date.getMonth() === month;
+      // Parse date string as local time to avoid UTC timezone shift
+      const [y, m] = d.date.split('-').map(Number);
+      return y === year && (m - 1) === month;
     })
     .map(d => ({
       date: d.date,
@@ -811,7 +812,9 @@ function getDayOfWeekAverages() {
   const dayTotals = Array(7).fill(0).map(() => ({ reply: [], chat: [], inbound: [], outbound: [] }));
 
   rangeData.forEach(day => {
-    const dayOfWeek = new Date(day.date).getDay();
+    // Parse date string as local time to avoid UTC timezone shift
+    const [year, month, d] = day.date.split('-').map(Number);
+    const dayOfWeek = new Date(year, month - 1, d).getDay();
     dayTotals[dayOfWeek].reply.push(day.reply);
     dayTotals[dayOfWeek].chat.push(day.chat);
     dayTotals[dayOfWeek].inbound.push(day.inbound);
@@ -1007,7 +1010,9 @@ function getTodayDate() {
 }
 
 function formatDate(dateStr) {
-  const date = new Date(dateStr);
+  // Parse date string as local time to avoid UTC timezone shift
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
