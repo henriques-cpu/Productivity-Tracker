@@ -162,24 +162,36 @@
     <!-- Manual Tracking Section -->
     <div class="manual-section">
       <h2 class="section-title">Manual Tracking</h2>
-      <p class="section-subtitle">Use these buttons if automatic tracking doesn't work</p>
+      <p class="section-subtitle">Use these buttons to adjust counts</p>
       <div class="manual-buttons">
-        <button class="manual-btn replies" data-metric="reply">
-          <span class="btn-icon">+</span>
-          <span>Reply</span>
-        </button>
-        <button class="manual-btn chats" data-metric="chat">
-          <span class="btn-icon">+</span>
-          <span>Chat</span>
-        </button>
-        <button class="manual-btn inbound" data-metric="inbound">
-          <span class="btn-icon">+</span>
-          <span>Inbound</span>
-        </button>
-        <button class="manual-btn outbound" data-metric="outbound">
-          <span class="btn-icon">+</span>
-          <span>Outbound</span>
-        </button>
+        <div class="metric-control replies">
+          <span class="metric-label">Reply</span>
+          <div class="metric-buttons">
+            <button class="subtract-btn" data-metric="reply" title="Subtract Reply">−</button>
+            <button class="add-btn" data-metric="reply" title="Add Reply">+</button>
+          </div>
+        </div>
+        <div class="metric-control chats">
+          <span class="metric-label">Chat</span>
+          <div class="metric-buttons">
+            <button class="subtract-btn" data-metric="chat" title="Subtract Chat">−</button>
+            <button class="add-btn" data-metric="chat" title="Add Chat">+</button>
+          </div>
+        </div>
+        <div class="metric-control inbound">
+          <span class="metric-label">Inbound</span>
+          <div class="metric-buttons">
+            <button class="subtract-btn" data-metric="inbound" title="Subtract Inbound">−</button>
+            <button class="add-btn" data-metric="inbound" title="Add Inbound">+</button>
+          </div>
+        </div>
+        <div class="metric-control outbound">
+          <span class="metric-label">Outbound</span>
+          <div class="metric-buttons">
+            <button class="subtract-btn" data-metric="outbound" title="Subtract Outbound">−</button>
+            <button class="add-btn" data-metric="outbound" title="Add Outbound">+</button>
+          </div>
+        </div>
       </div>
     </div>
 
