@@ -1284,6 +1284,15 @@ async function getTicketAccumulatedTime(ticketId) {
 async function startTicketTimer(ticketId) {
   if (!ticketId || ticketId === state.currentTicketId) return;
 
+  // Check if tracking is enabled
+  const trackingState = await chrome.storage.local.get(['trackingEnabled']);
+  const isTrackingEnabled = trackingState.trackingEnabled !== false; // Default to true
+
+  if (!isTrackingEnabled) {
+    log(`Tracking is disabled - skipping ticket timer for #${ticketId}`);
+    return;
+  }
+
   // End any existing ticket timer first
   if (state.currentTicketId) {
     await endTicketTimer();
@@ -1404,6 +1413,21 @@ function setupUrlChangeDetection() {
   // Also listen for popstate (back/forward navigation)
   window.addEventListener('popstate', () => {
     setTimeout(checkAndUpdateTicketTracking, 100);
+  });
+
+  // Listen for tracking state changes - stop ticket timer when tracking is disabled
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local' && changes.trackingEnabled) {
+      const isEnabled = changes.trackingEnabled.newValue !== false;
+      if (!isEnabled && state.currentTicketId) {
+        log('Tracking disabled - stopping ticket timer');
+        endTicketTimer();
+      } else if (isEnabled) {
+        // Tracking re-enabled - check if we should start tracking current ticket
+        log('Tracking re-enabled - checking for active ticket');
+        checkAndUpdateTicketTracking();
+      }
+    }
   });
 
   // Periodic check as fallback (every 2 seconds)
