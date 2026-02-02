@@ -508,15 +508,18 @@ function updateTicketTimerDisplay(activeTicket) {
     return;
   }
 
-  const elapsed = Date.now() - activeTicket.startTime;
+  // Calculate total time: accumulated time from previous sessions + current session
+  const currentSessionTime = Date.now() - activeTicket.startTime;
+  const accumulatedTime = activeTicket.accumulatedTime || 0;
+  const totalElapsed = accumulatedTime + currentSessionTime;
 
   if (ticketIdDisplay) ticketIdDisplay.textContent = `#${activeTicket.ticketId}`;
-  if (timerDisplay) timerDisplay.textContent = formatDuration(elapsed);
+  if (timerDisplay) timerDisplay.textContent = formatDuration(totalElapsed);
   if (ticketSubjectDisplay) ticketSubjectDisplay.textContent = activeTicket.subject || '';
   if (timerSection) timerSection.classList.add('active');
 
-  // Update reminder badges to show which have fired
-  updateReminderBadges(elapsed);
+  // Update reminder badges to show which have fired (based on total time)
+  updateReminderBadges(totalElapsed);
 }
 
 /**
