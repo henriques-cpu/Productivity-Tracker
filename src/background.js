@@ -175,9 +175,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'TICKET_OPENED': {
-          const { ticketId, startTime } = message.data;
-          console.log(`[ZKT Background] Ticket #${ticketId} opened`);
-          await createTicketReminders(ticketId, startTime);
+          const { ticketId, startTime, accumulatedTime } = message.data;
+          console.log(`[ZKT Background] Ticket #${ticketId} opened (accumulated: ${Math.round((accumulatedTime || 0) / 1000)}s)`);
+          await createTicketReminders(ticketId, startTime, accumulatedTime || 0);
           sendResponse({ success: true });
           break;
         }
@@ -201,7 +201,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Refresh alarms if there's an active ticket
           const result = await chrome.storage.local.get(['activeTicket']);
           if (result.activeTicket) {
-            await createTicketReminders(result.activeTicket.ticketId, result.activeTicket.startTime);
+            await createTicketReminders(
+              result.activeTicket.ticketId,
+              result.activeTicket.startTime,
+              result.activeTicket.accumulatedTime || 0
+            );
           }
           sendResponse({ success: true });
           break;
@@ -236,8 +240,11 @@ async function getReminderSettings() {
 
 /**
  * Create reminder alarms for a ticket
+ * @param {string} ticketId - The ticket ID
+ * @param {number} startTime - When the current session started
+ * @param {number} accumulatedTime - Time already accumulated on this ticket today (ms)
  */
-async function createTicketReminders(ticketId, startTime) {
+async function createTicketReminders(ticketId, startTime, accumulatedTime = 0) {
   const settings = await getReminderSettings();
 
   if (!settings.enabled) {
@@ -249,19 +256,26 @@ async function createTicketReminders(ticketId, startTime) {
   await clearTicketReminders(ticketId);
 
   const now = Date.now();
-  const elapsedMinutes = (now - startTime) / (1000 * 60);
+  const currentSessionMinutes = (now - startTime) / (1000 * 60);
+  const accumulatedMinutes = accumulatedTime / (1000 * 60);
+  const totalElapsedMinutes = accumulatedMinutes + currentSessionMinutes;
 
-  // Create alarms for each interval that hasn't passed yet
+  console.log(`[ZKT Background] Creating reminders for ticket #${ticketId}: accumulated=${accumulatedMinutes.toFixed(1)}m, session=${currentSessionMinutes.toFixed(1)}m, total=${totalElapsedMinutes.toFixed(1)}m`);
+
+  // Create alarms for each interval that hasn't passed yet (based on total time)
   for (const minutes of settings.intervals) {
-    if (minutes > elapsedMinutes) {
+    if (minutes > totalElapsedMinutes) {
       const alarmName = `${TICKET_ALARM_PREFIX}${ticketId}-${minutes}`;
-      const delayMinutes = minutes - elapsedMinutes;
+      // Delay is based on how much more time is needed to reach the interval
+      const delayMinutes = minutes - totalElapsedMinutes;
 
       chrome.alarms.create(alarmName, {
         delayInMinutes: delayMinutes,
       });
 
-      console.log(`[ZKT Background] Created alarm "${alarmName}" for ${delayMinutes.toFixed(1)} minutes from now`);
+      console.log(`[ZKT Background] Created alarm "${alarmName}" for ${delayMinutes.toFixed(1)} minutes from now (total will be ${minutes}m)`);
+    } else {
+      console.log(`[ZKT Background] Skipping ${minutes}m reminder - already passed (total: ${totalElapsedMinutes.toFixed(1)}m)`);
     }
   }
 }

@@ -1242,6 +1242,43 @@ function getTicketSubject() {
 }
 
 /**
+ * Get or initialize the daily ticket time cache
+ * Cache structure: { date: "YYYY-MM-DD", tickets: { "12345": accumulatedMs, ... } }
+ */
+async function getTicketTimeCache() {
+  const today = getTodayDateString();
+  const result = await chrome.storage.local.get(['ticketTimeCache']);
+  let cache = result.ticketTimeCache;
+
+  // If no cache or cache is from a different day, create new one
+  if (!cache || cache.date !== today) {
+    cache = { date: today, tickets: {} };
+    await chrome.storage.local.set({ ticketTimeCache: cache });
+    log('Created new daily ticket time cache');
+  }
+
+  return cache;
+}
+
+/**
+ * Save accumulated time for a ticket to the daily cache
+ */
+async function saveTicketAccumulatedTime(ticketId, accumulatedMs) {
+  const cache = await getTicketTimeCache();
+  cache.tickets[ticketId] = accumulatedMs;
+  await chrome.storage.local.set({ ticketTimeCache: cache });
+  log(`Saved accumulated time for ticket #${ticketId}: ${Math.round(accumulatedMs / 1000)}s`);
+}
+
+/**
+ * Get accumulated time for a ticket from the daily cache
+ */
+async function getTicketAccumulatedTime(ticketId) {
+  const cache = await getTicketTimeCache();
+  return cache.tickets[ticketId] || 0;
+}
+
+/**
  * Start tracking time on a ticket
  */
 async function startTicketTimer(ticketId) {
@@ -1255,20 +1292,24 @@ async function startTicketTimer(ticketId) {
   state.currentTicketId = ticketId;
   state.ticketStartTime = Date.now();
 
+  // Get previously accumulated time for this ticket today
+  const accumulatedTime = await getTicketAccumulatedTime(ticketId);
+
   const subject = getTicketSubject();
 
-  log(`Started tracking ticket #${ticketId}: ${subject}`);
+  log(`Started tracking ticket #${ticketId}: ${subject} (previously accumulated: ${Math.round(accumulatedTime / 1000)}s)`);
 
-  // Store active ticket in storage
+  // Store active ticket in storage with accumulated time
   const activeTicket = {
     ticketId,
     subject,
     startTime: state.ticketStartTime,
+    accumulatedTime, // Time already spent on this ticket today
   };
 
   await chrome.storage.local.set({ activeTicket });
 
-  // Notify background script to start reminder alarms
+  // Notify background script to start reminder alarms (accounting for accumulated time)
   chrome.runtime.sendMessage({
     type: 'TICKET_OPENED',
     data: activeTicket,
@@ -1282,10 +1323,17 @@ async function endTicketTimer() {
   if (!state.currentTicketId || !state.ticketStartTime) return;
 
   const endTime = Date.now();
-  const duration = endTime - state.ticketStartTime;
+  const sessionDuration = endTime - state.ticketStartTime;
   const ticketId = state.currentTicketId;
 
-  log(`Ended tracking ticket #${ticketId}, duration: ${Math.round(duration / 1000)}s`);
+  // Get current accumulated time and add this session's duration
+  const previousAccumulated = await getTicketAccumulatedTime(ticketId);
+  const totalAccumulated = previousAccumulated + sessionDuration;
+
+  // Save the new accumulated time to the daily cache
+  await saveTicketAccumulatedTime(ticketId, totalAccumulated);
+
+  log(`Ended tracking ticket #${ticketId}, session: ${Math.round(sessionDuration / 1000)}s, total today: ${Math.round(totalAccumulated / 1000)}s`);
 
   // Store completed ticket session in history
   const result = await chrome.storage.local.get(['ticketHistory']);
@@ -1296,7 +1344,8 @@ async function endTicketTimer() {
     subject: getTicketSubject(),
     startTime: state.ticketStartTime,
     endTime,
-    duration,
+    duration: sessionDuration,
+    totalAccumulated,
     date: getTodayDateString(),
   });
 
@@ -1309,7 +1358,7 @@ async function endTicketTimer() {
   // Notify background script to clear alarms
   chrome.runtime.sendMessage({
     type: 'TICKET_CLOSED',
-    data: { ticketId },
+    data: { ticketId, totalAccumulated },
   });
 
   state.currentTicketId = null;
