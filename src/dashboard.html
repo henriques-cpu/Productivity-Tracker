@@ -173,6 +173,123 @@
                 </div>
             </section>
 
+            <!-- Total Replies Summary -->
+            <section class="dashboard-section">
+                <h2 class="section-title">Total Replies Summary</h2>
+                <div class="replies-summary-grid">
+                    <div class="replies-total-card">
+                        <div class="replies-total-icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="replies-total-info">
+                            <div class="replies-total-label">Total Replies Today</div>
+                            <div class="replies-total-value" id="totalRepliesToday">0</div>
+                        </div>
+                    </div>
+                    <div class="replies-breakdown">
+                        <div class="reply-channel-card">
+                            <div class="channel-icon email">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                                    <path d="M22 6l-10 7L2 6"></path>
+                                </svg>
+                            </div>
+                            <div class="channel-info">
+                                <span class="channel-label">Email</span>
+                                <span class="channel-value" id="replyEmailCount">0</span>
+                            </div>
+                        </div>
+                        <div class="reply-channel-card">
+                            <div class="channel-icon sms">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                                    <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                                </svg>
+                            </div>
+                            <div class="channel-info">
+                                <span class="channel-label">SMS</span>
+                                <span class="channel-value" id="replySMSCount">0</span>
+                            </div>
+                        </div>
+                        <div class="reply-channel-card">
+                            <div class="channel-icon chat">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                                </svg>
+                            </div>
+                            <div class="channel-info">
+                                <span class="channel-label">Chat</span>
+                                <span class="channel-value" id="replyChatCount">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Ticket Time Statistics -->
+            <section class="dashboard-section">
+                <h2 class="section-title">Ticket Time Statistics</h2>
+                <div class="ticket-stats-grid">
+                    <div class="ticket-stat-card">
+                        <div class="ticket-stat-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </div>
+                        <div class="ticket-stat-info">
+                            <div class="ticket-stat-label">Total Time Today</div>
+                            <div class="ticket-stat-value" id="totalTicketTimeToday">0:00</div>
+                        </div>
+                    </div>
+                    <div class="ticket-stat-card">
+                        <div class="ticket-stat-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                            </svg>
+                        </div>
+                        <div class="ticket-stat-info">
+                            <div class="ticket-stat-label">Tickets Worked</div>
+                            <div class="ticket-stat-value" id="ticketsWorkedToday">0</div>
+                        </div>
+                    </div>
+                    <div class="ticket-stat-card">
+                        <div class="ticket-stat-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="1" x2="12" y2="23"></line>
+                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                            </svg>
+                        </div>
+                        <div class="ticket-stat-info">
+                            <div class="ticket-stat-label">Avg Time/Ticket</div>
+                            <div class="ticket-stat-value" id="avgTimePerTicket">0:00</div>
+                        </div>
+                    </div>
+                    <div class="ticket-stat-card">
+                        <div class="ticket-stat-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 20V10"></path>
+                                <path d="M18 20V4"></path>
+                                <path d="M6 20v-4"></path>
+                            </svg>
+                        </div>
+                        <div class="ticket-stat-info">
+                            <div class="ticket-stat-label">Longest Ticket</div>
+                            <div class="ticket-stat-value" id="longestTicketTime">0:00</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ticket-time-list-container">
+                    <h3 class="subsection-title">Today's Ticket Times</h3>
+                    <div class="ticket-time-list" id="ticketTimeList">
+                        <div class="ticket-time-empty">No ticket data for today</div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Today vs Goal Chart -->
             <section class="dashboard-section">
                 <h2 class="section-title">Today vs Goals</h2>

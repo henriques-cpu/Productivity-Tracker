@@ -3,9 +3,11 @@
 
 // Global State
 let currentData = {
-  metrics: { date: '', reply: 0, chat: 0, inbound: 0, outbound: 0 },
+  metrics: { date: '', reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 },
   history: [],
-  goals: { reply: 20 }
+  goals: { reply: 20 },
+  ticketTimeCache: { date: '', tickets: {} },
+  ticketHistory: []
 };
 let currentRange = 7;
 let charts = {};
@@ -55,7 +57,7 @@ function initializeEventListeners() {
 
   // Listen for storage changes (real-time updates)
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.metrics || changes.history || changes.goals) {
+    if (changes.metrics || changes.history || changes.goals || changes.ticketTimeCache || changes.ticketHistory) {
       loadData();
     }
   });
@@ -64,11 +66,13 @@ function initializeEventListeners() {
 // ===== Data Loading =====
 async function loadData() {
   try {
-    const result = await chrome.storage.local.get(['metrics', 'history', 'goals']);
+    const result = await chrome.storage.local.get(['metrics', 'history', 'goals', 'ticketTimeCache', 'ticketHistory']);
 
-    currentData.metrics = result.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0 };
+    currentData.metrics = result.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 };
     currentData.history = result.history || [];
     currentData.goals = result.goals || { reply: 20 };
+    currentData.ticketTimeCache = result.ticketTimeCache || { date: getTodayDate(), tickets: {} };
+    currentData.ticketHistory = result.ticketHistory || [];
 
     updateLastUpdated();
     renderDashboard();
@@ -113,6 +117,12 @@ function renderOverviewTab() {
 
   // Summary Statistics
   updateSummaryStats();
+
+  // Total Replies Summary
+  renderRepliesSummary();
+
+  // Ticket Time Statistics
+  renderTicketTimeStats();
 
   // Charts
   createTodayVsGoalChart();
@@ -162,6 +172,109 @@ function updateSummaryStats() {
   document.getElementById('bestDayValue').textContent = bestDay.total;
   document.getElementById('bestDayDate').textContent = bestDay.date;
   document.getElementById('goalAchievement').textContent = `${goalRate}%`;
+}
+
+// ===== Total Replies Summary =====
+function renderRepliesSummary() {
+  const { metrics } = currentData;
+
+  // Total replies today (sum of all channels, or use total reply count)
+  const totalReplies = metrics.reply || 0;
+  const emailReplies = metrics.replyEmail || 0;
+  const smsReplies = metrics.replySMS || 0;
+  const chatReplies = metrics.replyChat || 0;
+
+  document.getElementById('totalRepliesToday').textContent = totalReplies;
+  document.getElementById('replyEmailCount').textContent = emailReplies;
+  document.getElementById('replySMSCount').textContent = smsReplies;
+  document.getElementById('replyChatCount').textContent = chatReplies;
+}
+
+// ===== Ticket Time Statistics =====
+function renderTicketTimeStats() {
+  const { ticketTimeCache, ticketHistory } = currentData;
+  const today = getTodayDate();
+
+  // Get today's ticket data from cache
+  const todayTickets = (ticketTimeCache.date === today) ? ticketTimeCache.tickets : {};
+
+  // Calculate statistics
+  const ticketIds = Object.keys(todayTickets);
+  const ticketCount = ticketIds.length;
+
+  // Total time across all tickets today
+  const totalTimeMs = Object.values(todayTickets).reduce((sum, time) => sum + time, 0);
+
+  // Average time per ticket
+  const avgTimeMs = ticketCount > 0 ? totalTimeMs / ticketCount : 0;
+
+  // Longest ticket time
+  const longestTimeMs = ticketCount > 0 ? Math.max(...Object.values(todayTickets)) : 0;
+
+  // Update the stat cards
+  document.getElementById('totalTicketTimeToday').textContent = formatDuration(totalTimeMs);
+  document.getElementById('ticketsWorkedToday').textContent = ticketCount;
+  document.getElementById('avgTimePerTicket').textContent = formatDuration(avgTimeMs);
+  document.getElementById('longestTicketTime').textContent = formatDuration(longestTimeMs);
+
+  // Render the ticket time list
+  renderTicketTimeList(todayTickets, ticketHistory);
+}
+
+function renderTicketTimeList(todayTickets, ticketHistory) {
+  const listContainer = document.getElementById('ticketTimeList');
+  if (!listContainer) return;
+
+  const ticketIds = Object.keys(todayTickets);
+
+  if (ticketIds.length === 0) {
+    listContainer.innerHTML = '<div class="ticket-time-empty">No ticket data for today</div>';
+    return;
+  }
+
+  // Get ticket subjects from history if available
+  const today = getTodayDate();
+  const todayHistory = ticketHistory.filter(t => t.date === today);
+
+  // Create a map of ticket IDs to their most recent subject
+  const subjectMap = {};
+  todayHistory.forEach(entry => {
+    subjectMap[entry.ticketId] = entry.subject;
+  });
+
+  // Sort tickets by time spent (descending)
+  const sortedTickets = ticketIds
+    .map(id => ({ id, time: todayTickets[id], subject: subjectMap[id] || 'Unknown' }))
+    .sort((a, b) => b.time - a.time);
+
+  // Render the list
+  listContainer.innerHTML = sortedTickets.map(ticket => `
+    <div class="ticket-time-item">
+      <div class="ticket-time-info">
+        <span class="ticket-time-id">#${ticket.id}</span>
+        <span class="ticket-time-subject">${escapeHtml(ticket.subject)}</span>
+      </div>
+      <span class="ticket-time-duration">${formatDuration(ticket.time)}</span>
+    </div>
+  `).join('');
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // ===== Trends Tab =====
