@@ -17,6 +17,15 @@ const DEFAULT_GOALS = {
   outbound: 5,
 };
 
+// Default ticket time reminder settings (in minutes)
+const DEFAULT_REMINDER_SETTINGS = {
+  enabled: true,
+  intervals: [5, 10, 15], // Remind at 5, 10, and 15 minutes
+};
+
+// Alarm name prefix for ticket reminders
+const TICKET_ALARM_PREFIX = 'ticket-reminder-';
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -165,6 +174,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
+        case 'TICKET_OPENED': {
+          const { ticketId, startTime } = message.data;
+          console.log(`[ZKT Background] Ticket #${ticketId} opened`);
+          await createTicketReminders(ticketId, startTime);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'TICKET_CLOSED': {
+          const { ticketId } = message.data;
+          console.log(`[ZKT Background] Ticket #${ticketId} closed`);
+          await clearTicketReminders(ticketId);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'GET_REMINDER_SETTINGS': {
+          const settings = await getReminderSettings();
+          sendResponse({ success: true, settings });
+          break;
+        }
+
+        case 'SAVE_REMINDER_SETTINGS': {
+          await chrome.storage.local.set({ reminderSettings: message.settings });
+          // Refresh alarms if there's an active ticket
+          const result = await chrome.storage.local.get(['activeTicket']);
+          if (result.activeTicket) {
+            await createTicketReminders(result.activeTicket.ticketId, result.activeTicket.startTime);
+          }
+          sendResponse({ success: true });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -175,6 +217,128 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
 
   return true; // Keep channel open for async response
+});
+
+// ============================================================================
+// TICKET TIME REMINDER SYSTEM
+// ============================================================================
+
+/**
+ * Get reminder settings from storage
+ */
+async function getReminderSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['reminderSettings'], (result) => {
+      resolve(result.reminderSettings || DEFAULT_REMINDER_SETTINGS);
+    });
+  });
+}
+
+/**
+ * Create reminder alarms for a ticket
+ */
+async function createTicketReminders(ticketId, startTime) {
+  const settings = await getReminderSettings();
+
+  if (!settings.enabled) {
+    console.log('[ZKT Background] Reminders disabled, not creating alarms');
+    return;
+  }
+
+  // Clear any existing alarms for this ticket
+  await clearTicketReminders(ticketId);
+
+  const now = Date.now();
+  const elapsedMinutes = (now - startTime) / (1000 * 60);
+
+  // Create alarms for each interval that hasn't passed yet
+  for (const minutes of settings.intervals) {
+    if (minutes > elapsedMinutes) {
+      const alarmName = `${TICKET_ALARM_PREFIX}${ticketId}-${minutes}`;
+      const delayMinutes = minutes - elapsedMinutes;
+
+      chrome.alarms.create(alarmName, {
+        delayInMinutes: delayMinutes,
+      });
+
+      console.log(`[ZKT Background] Created alarm "${alarmName}" for ${delayMinutes.toFixed(1)} minutes from now`);
+    }
+  }
+}
+
+/**
+ * Clear all reminder alarms for a ticket
+ */
+async function clearTicketReminders(ticketId) {
+  const alarms = await chrome.alarms.getAll();
+
+  for (const alarm of alarms) {
+    if (alarm.name.startsWith(`${TICKET_ALARM_PREFIX}${ticketId}`)) {
+      await chrome.alarms.clear(alarm.name);
+      console.log(`[ZKT Background] Cleared alarm "${alarm.name}"`);
+    }
+  }
+}
+
+/**
+ * Clear all ticket reminder alarms
+ */
+async function clearAllTicketReminders() {
+  const alarms = await chrome.alarms.getAll();
+
+  for (const alarm of alarms) {
+    if (alarm.name.startsWith(TICKET_ALARM_PREFIX)) {
+      await chrome.alarms.clear(alarm.name);
+    }
+  }
+
+  console.log('[ZKT Background] Cleared all ticket reminder alarms');
+}
+
+/**
+ * Handle alarm trigger - show notification
+ */
+async function handleTicketReminderAlarm(alarmName) {
+  // Extract ticket ID and minutes from alarm name
+  // Format: ticket-reminder-{ticketId}-{minutes}
+  const match = alarmName.match(/^ticket-reminder-(\d+)-(\d+)$/);
+  if (!match) return;
+
+  const ticketId = match[1];
+  const minutes = match[2];
+
+  // Get active ticket info
+  const result = await chrome.storage.local.get(['activeTicket']);
+  const activeTicket = result.activeTicket;
+
+  if (!activeTicket || activeTicket.ticketId !== ticketId) {
+    console.log('[ZKT Background] Ticket no longer active, skipping notification');
+    return;
+  }
+
+  // Show notification
+  const subject = activeTicket.subject || `Ticket #${ticketId}`;
+
+  // Create notification
+  chrome.notifications.create(`ticket-time-${ticketId}-${minutes}`, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `${minutes} Minutes on Ticket`,
+    message: `You've been working on "${subject}" for ${minutes} minutes.`,
+    priority: 2,
+    requireInteraction: false,
+  });
+
+  console.log(`[ZKT Background] Showed ${minutes}-minute reminder for ticket #${ticketId}`);
+}
+
+// Listen for alarms
+chrome.alarms.onAlarm.addListener((alarm) => {
+  console.log('[ZKT Background] Alarm triggered:', alarm.name);
+
+  if (alarm.name.startsWith(TICKET_ALARM_PREFIX)) {
+    handleTicketReminderAlarm(alarm.name);
+  }
 });
 
 // ============================================================================

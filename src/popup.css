@@ -816,6 +816,208 @@ body {
 }
 
 /* ============================================
+   Ticket Timer Section
+   ============================================ */
+.ticket-timer-section {
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  border: 1px solid var(--border-color);
+  transition: var(--transition-normal);
+}
+
+.ticket-timer-section.active {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 1px var(--accent-purple), var(--shadow-card);
+}
+
+.ticket-timer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.ticket-timer-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(123, 31, 162, 0.15);
+  border-radius: var(--radius-sm);
+  color: var(--accent-purple);
+}
+
+.ticket-timer-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ticket-timer-section.active .ticket-timer-icon {
+  background: var(--accent-purple);
+  color: white;
+  animation: pulse-icon 2s ease-in-out infinite;
+}
+
+@keyframes pulse-icon {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.ticket-timer-info {
+  flex: 1;
+}
+
+.ticket-timer-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ticket-timer-id {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ticket-timer-display {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: 'Consolas', 'Monaco', monospace;
+  min-width: 80px;
+  text-align: right;
+}
+
+.ticket-timer-section.active .ticket-timer-display {
+  color: var(--accent-purple);
+}
+
+.ticket-timer-subject {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 16px;
+}
+
+.ticket-timer-reminders {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
+}
+
+.reminder-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.reminder-badges {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.reminder-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  transition: var(--transition-fast);
+}
+
+.reminder-badge.passed {
+  background: var(--accent-purple);
+  color: white;
+  border-color: var(--accent-purple);
+}
+
+.reminder-disabled {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.reminder-settings-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reminder-settings-btn:hover {
+  color: var(--accent-purple);
+  background: rgba(123, 31, 162, 0.1);
+}
+
+.reminder-settings-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Reminder Modal Styles */
+.reminder-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) 0;
+  margin-bottom: var(--spacing-md);
+  font-size: 14px;
+}
+
+.reminder-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-md);
+}
+
+.reminder-intervals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.reminder-interval-item {
+  display: flex;
+  align-items: center;
+}
+
+.reminder-interval-item label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.reminder-interval-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-purple);
+  cursor: pointer;
+}
+
+/* ============================================
    Scrollbar Styles
    ============================================ */
 ::-webkit-scrollbar {

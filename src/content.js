@@ -110,6 +110,9 @@ const state = {
   isCallActive: false,
   lastEventTime: {},
   debounceMs: 2000, // Prevent double-counting within 2 seconds
+  // Ticket time tracking
+  currentTicketId: null,
+  ticketStartTime: null,
 };
 
 // ============================================================================
@@ -1186,6 +1189,181 @@ function checkAndTrackReply(operationName, variables) {
 }
 
 // ============================================================================
+// TICKET TIME TRACKING
+// ============================================================================
+
+/**
+ * Extract ticket ID from URL
+ * Zendesk URLs typically look like: /agent/tickets/12345
+ */
+function extractTicketIdFromUrl(url) {
+  const match = url.match(/\/tickets\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Get current ticket ID from the page
+ */
+function getCurrentTicketId() {
+  // First try URL
+  const urlTicketId = extractTicketIdFromUrl(window.location.href);
+  if (urlTicketId) return urlTicketId;
+
+  // Fallback: try to find ticket ID in DOM
+  const ticketIdElement = document.querySelector('[data-test-id="ticket-pane-header-id"]');
+  if (ticketIdElement) {
+    const text = ticketIdElement.textContent.replace('#', '').trim();
+    if (/^\d+$/.test(text)) return text;
+  }
+
+  return null;
+}
+
+/**
+ * Get ticket subject/title from the page
+ */
+function getTicketSubject() {
+  // Try various selectors for ticket subject
+  const selectors = [
+    '[data-test-id="ticket-pane-subject"]',
+    '[data-test-id="omni-header-subject"]',
+    '.ticket-subject',
+    'h1[data-garden-id="typography.h1"]',
+  ];
+
+  for (const selector of selectors) {
+    const el = document.querySelector(selector);
+    if (el && el.textContent) {
+      return el.textContent.trim().substring(0, 100);
+    }
+  }
+
+  return 'Unknown Ticket';
+}
+
+/**
+ * Start tracking time on a ticket
+ */
+async function startTicketTimer(ticketId) {
+  if (!ticketId || ticketId === state.currentTicketId) return;
+
+  // End any existing ticket timer first
+  if (state.currentTicketId) {
+    await endTicketTimer();
+  }
+
+  state.currentTicketId = ticketId;
+  state.ticketStartTime = Date.now();
+
+  const subject = getTicketSubject();
+
+  log(`Started tracking ticket #${ticketId}: ${subject}`);
+
+  // Store active ticket in storage
+  const activeTicket = {
+    ticketId,
+    subject,
+    startTime: state.ticketStartTime,
+  };
+
+  await chrome.storage.local.set({ activeTicket });
+
+  // Notify background script to start reminder alarms
+  chrome.runtime.sendMessage({
+    type: 'TICKET_OPENED',
+    data: activeTicket,
+  });
+}
+
+/**
+ * End tracking time on current ticket
+ */
+async function endTicketTimer() {
+  if (!state.currentTicketId || !state.ticketStartTime) return;
+
+  const endTime = Date.now();
+  const duration = endTime - state.ticketStartTime;
+  const ticketId = state.currentTicketId;
+
+  log(`Ended tracking ticket #${ticketId}, duration: ${Math.round(duration / 1000)}s`);
+
+  // Store completed ticket session in history
+  const result = await chrome.storage.local.get(['ticketHistory']);
+  const history = result.ticketHistory || [];
+
+  history.push({
+    ticketId,
+    subject: getTicketSubject(),
+    startTime: state.ticketStartTime,
+    endTime,
+    duration,
+    date: getTodayDateString(),
+  });
+
+  // Keep last 500 ticket sessions
+  await chrome.storage.local.set({
+    ticketHistory: history.slice(-500),
+    activeTicket: null,
+  });
+
+  // Notify background script to clear alarms
+  chrome.runtime.sendMessage({
+    type: 'TICKET_CLOSED',
+    data: { ticketId },
+  });
+
+  state.currentTicketId = null;
+  state.ticketStartTime = null;
+}
+
+/**
+ * Check if current page is a ticket and update tracking
+ */
+function checkAndUpdateTicketTracking() {
+  const ticketId = getCurrentTicketId();
+
+  if (ticketId && ticketId !== state.currentTicketId) {
+    // New ticket detected
+    startTicketTimer(ticketId);
+  } else if (!ticketId && state.currentTicketId) {
+    // Left ticket page
+    endTicketTimer();
+  }
+}
+
+/**
+ * Setup URL change detection for SPA navigation
+ */
+function setupUrlChangeDetection() {
+  // Initial check
+  checkAndUpdateTicketTracking();
+
+  // Listen for URL changes (Zendesk is a SPA)
+  let lastUrl = window.location.href;
+
+  // Use MutationObserver on document to detect URL changes
+  const urlObserver = new MutationObserver(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      log('URL changed:', lastUrl);
+      checkAndUpdateTicketTracking();
+    }
+  });
+
+  urlObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Also listen for popstate (back/forward navigation)
+  window.addEventListener('popstate', () => {
+    setTimeout(checkAndUpdateTicketTracking, 100);
+  });
+
+  // Periodic check as fallback (every 2 seconds)
+  setInterval(checkAndUpdateTicketTracking, 2000);
+
+  log('Ticket time tracking initialized');
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -1197,6 +1375,9 @@ function init() {
 
   // Setup mutation observer for DOM changes
   setupMutationObserver();
+
+  // Setup ticket time tracking
+  setupUrlChangeDetection();
 
   log('Initialized successfully');
   log('Debug helpers available: Type ZKT.inspect() in console to identify elements');
