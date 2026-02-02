@@ -8,7 +8,8 @@
     "activeTab",
     "contextMenus",
     "alarms",
-    "tabs"
+    "tabs",
+    "notifications"
   ],
   "host_permissions": [
     "*://*.zendesk.com/*"

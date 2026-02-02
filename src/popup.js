@@ -18,6 +18,13 @@ const DEFAULT_GOALS = {
 let chart = null;
 let currentMetrics = null;
 let goals = { ...DEFAULT_GOALS };
+let ticketTimerInterval = null;
+
+// Default reminder settings
+const DEFAULT_REMINDER_SETTINGS = {
+  enabled: true,
+  intervals: [5, 10, 15],
+};
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -466,6 +473,207 @@ async function handleTrackingToggle() {
 }
 
 // ============================================================================
+// TICKET TIMER
+// ============================================================================
+
+/**
+ * Format duration in milliseconds to MM:SS or HH:MM:SS
+ */
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Update the ticket timer display
+ */
+function updateTicketTimerDisplay(activeTicket) {
+  const timerDisplay = document.getElementById('ticketTimerDisplay');
+  const ticketIdDisplay = document.getElementById('currentTicketId');
+  const ticketSubjectDisplay = document.getElementById('currentTicketSubject');
+  const timerSection = document.getElementById('ticketTimerSection');
+
+  if (!activeTicket) {
+    if (ticketIdDisplay) ticketIdDisplay.textContent = 'No ticket open';
+    if (timerDisplay) timerDisplay.textContent = '--:--';
+    if (ticketSubjectDisplay) ticketSubjectDisplay.textContent = '';
+    if (timerSection) timerSection.classList.remove('active');
+    return;
+  }
+
+  const elapsed = Date.now() - activeTicket.startTime;
+
+  if (ticketIdDisplay) ticketIdDisplay.textContent = `#${activeTicket.ticketId}`;
+  if (timerDisplay) timerDisplay.textContent = formatDuration(elapsed);
+  if (ticketSubjectDisplay) ticketSubjectDisplay.textContent = activeTicket.subject || '';
+  if (timerSection) timerSection.classList.add('active');
+
+  // Update reminder badges to show which have fired
+  updateReminderBadges(elapsed);
+}
+
+/**
+ * Update reminder badges based on elapsed time
+ */
+function updateReminderBadges(elapsed) {
+  const elapsedMinutes = elapsed / (1000 * 60);
+  const badges = document.querySelectorAll('.reminder-badge');
+
+  badges.forEach((badge) => {
+    const minutes = parseInt(badge.dataset.minutes, 10);
+    if (elapsedMinutes >= minutes) {
+      badge.classList.add('passed');
+    } else {
+      badge.classList.remove('passed');
+    }
+  });
+}
+
+/**
+ * Start the ticket timer update interval
+ */
+function startTicketTimerUpdates() {
+  // Clear any existing interval
+  if (ticketTimerInterval) {
+    clearInterval(ticketTimerInterval);
+  }
+
+  // Update immediately
+  loadActiveTicketAndUpdate();
+
+  // Then update every second
+  ticketTimerInterval = setInterval(loadActiveTicketAndUpdate, 1000);
+}
+
+/**
+ * Load active ticket from storage and update display
+ */
+async function loadActiveTicketAndUpdate() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['activeTicket'], (result) => {
+      updateTicketTimerDisplay(result.activeTicket);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Load reminder settings from storage
+ */
+async function loadReminderSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['reminderSettings'], (result) => {
+      resolve(result.reminderSettings || DEFAULT_REMINDER_SETTINGS);
+    });
+  });
+}
+
+/**
+ * Update reminder settings UI
+ */
+async function updateReminderSettingsUI() {
+  const settings = await loadReminderSettings();
+
+  // Update enabled toggle
+  const enabledToggle = document.getElementById('reminderEnabledToggle');
+  if (enabledToggle) {
+    enabledToggle.checked = settings.enabled;
+  }
+
+  // Update interval checkboxes
+  const allIntervals = [5, 10, 15, 20, 30];
+  allIntervals.forEach((minutes) => {
+    const checkbox = document.getElementById(`reminder${minutes}`);
+    if (checkbox) {
+      checkbox.checked = settings.intervals.includes(minutes);
+    }
+  });
+
+  // Update badges in main UI
+  updateReminderBadgesFromSettings(settings);
+}
+
+/**
+ * Update the reminder badges shown in the timer section
+ */
+function updateReminderBadgesFromSettings(settings) {
+  const badgesContainer = document.getElementById('reminderBadges');
+  if (!badgesContainer) return;
+
+  badgesContainer.innerHTML = '';
+
+  if (!settings.enabled || settings.intervals.length === 0) {
+    badgesContainer.innerHTML = '<span class="reminder-disabled">Disabled</span>';
+    return;
+  }
+
+  settings.intervals.sort((a, b) => a - b).forEach((minutes) => {
+    const badge = document.createElement('span');
+    badge.className = 'reminder-badge';
+    badge.dataset.minutes = minutes;
+    badge.textContent = `${minutes}m`;
+    badgesContainer.appendChild(badge);
+  });
+}
+
+/**
+ * Save reminder settings
+ */
+async function handleSaveReminderSettings() {
+  const enabled = document.getElementById('reminderEnabledToggle')?.checked ?? true;
+
+  const intervals = [];
+  const allIntervals = [5, 10, 15, 20, 30];
+  allIntervals.forEach((minutes) => {
+    const checkbox = document.getElementById(`reminder${minutes}`);
+    if (checkbox?.checked) {
+      intervals.push(minutes);
+    }
+  });
+
+  const settings = { enabled, intervals };
+
+  // Save to storage
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ reminderSettings: settings }, resolve);
+  });
+
+  // Notify background script to update alarms
+  chrome.runtime.sendMessage({
+    type: 'SAVE_REMINDER_SETTINGS',
+    settings,
+  });
+
+  // Update UI
+  updateReminderBadgesFromSettings(settings);
+  closeReminderSettings();
+
+  console.log('[ZKT] Reminder settings saved:', settings);
+}
+
+/**
+ * Open reminder settings modal
+ */
+function openReminderSettings() {
+  updateReminderSettingsUI();
+  document.getElementById('reminderModal')?.classList.add('active');
+}
+
+/**
+ * Close reminder settings modal
+ */
+function closeReminderSettings() {
+  document.getElementById('reminderModal')?.classList.remove('active');
+}
+
+// ============================================================================
 // DASHBOARD
 // ============================================================================
 
@@ -549,12 +757,27 @@ function setupEventListeners() {
     if (e.target.id === 'settingsModal') closeSettings();
   });
 
+  // Reminder settings modal
+  document.getElementById('reminderSettingsBtn')?.addEventListener('click', openReminderSettings);
+  document.getElementById('closeReminderSettings')?.addEventListener('click', closeReminderSettings);
+  document.getElementById('saveReminderSettings')?.addEventListener('click', handleSaveReminderSettings);
+
+  // Close reminder modal on backdrop click
+  document.getElementById('reminderModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'reminderModal') closeReminderSettings();
+  });
+
   // Listen for storage changes from content script
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local' && changes.metrics) {
       currentMetrics = changes.metrics.newValue;
       updateScorecards(currentMetrics);
       updateChart(currentMetrics);
+    }
+
+    // Update ticket timer when active ticket changes
+    if (namespace === 'local' && changes.activeTicket) {
+      updateTicketTimerDisplay(changes.activeTicket.newValue);
     }
   });
 }
@@ -592,6 +815,10 @@ async function init() {
 
     // Check connection status
     updateConnectionStatus();
+
+    // Initialize ticket timer
+    startTicketTimerUpdates();
+    updateReminderSettingsUI();
 
     console.log('[ZKT] Popup initialized successfully');
   } catch (error) {
