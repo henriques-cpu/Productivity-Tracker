@@ -1315,3 +1315,26 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Company Badge */
+.company-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 12px;
+  border-radius: 12px;
+  margin-top: 8px;
+}
+
+.company-badge .company-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.company-badge .company-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #b3b3b3;
+}

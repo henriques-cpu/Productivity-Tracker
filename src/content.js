@@ -141,6 +141,41 @@ function createEmptyMetrics() {
   };
 }
 
+// ============================================================================
+// COMPANY-SCOPED STORAGE HELPERS
+// ============================================================================
+
+async function getActiveCompany() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+      const activeId = result.activeCompanyId;
+      const companies = result.companies || {};
+
+      if (activeId && companies[activeId]) {
+        resolve({ id: activeId, data: companies[activeId] });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function updateActiveCompanyData(updates) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+      const companies = result.companies || {};
+      const activeId = result.activeCompanyId;
+
+      if (activeId && companies[activeId]) {
+        companies[activeId] = { ...companies[activeId], ...updates };
+        chrome.storage.local.set({ companies }, () => resolve(true));
+      } else {
+        resolve(false);
+      }
+    });
+  });
+}
+
 /**
  * Check if event should be debounced (prevent double-counting)
  */
@@ -402,15 +437,20 @@ async function trackMetric(metricType, channel = null) {
   log(`Tracking: ${metricType}${channel ? ` (${channel})` : ''}`);
 
   try {
-    // Get current metrics from storage
-    const result = await chrome.storage.local.get(['metrics']);
-    let metrics = result.metrics || createEmptyMetrics();
+    // Get active company
+    const company = await getActiveCompany();
+
+    if (!company) {
+      log('No active company found, skipping tracking');
+      return;
+    }
+
+    let metrics = company.data.metrics || createEmptyMetrics();
 
     // Check for new day
     if (metrics.date !== getTodayDateString()) {
       // Archive old metrics
-      const historyResult = await chrome.storage.local.get(['history']);
-      const history = historyResult.history || [];
+      const history = company.data.history || [];
 
       if (metrics.date) {
         history.push({
@@ -423,7 +463,7 @@ async function trackMetric(metricType, channel = null) {
           inbound: metrics.inbound || 0,
           outbound: metrics.outbound || 0,
         });
-        await chrome.storage.local.set({ history: history.slice(-90) });
+        await updateActiveCompanyData({ history: history.slice(-90) });
       }
 
       metrics = createEmptyMetrics();
@@ -443,7 +483,7 @@ async function trackMetric(metricType, channel = null) {
       }
 
       metrics.lastUpdated = Date.now();
-      await chrome.storage.local.set({ metrics });
+      await updateActiveCompanyData({ metrics });
 
       log(`Tracked ${metricType}:`, metrics[metricType]);
       showNotification(metricType);
@@ -1247,13 +1287,18 @@ function getTicketSubject() {
  */
 async function getTicketTimeCache() {
   const today = getTodayDateString();
-  const result = await chrome.storage.local.get(['ticketTimeCache']);
-  let cache = result.ticketTimeCache;
+  const company = await getActiveCompany();
+
+  if (!company) {
+    return { date: today, tickets: {} };
+  }
+
+  let cache = company.data.ticketTimeCache;
 
   // If no cache or cache is from a different day, create new one
   if (!cache || cache.date !== today) {
     cache = { date: today, tickets: {} };
-    await chrome.storage.local.set({ ticketTimeCache: cache });
+    await updateActiveCompanyData({ ticketTimeCache: cache });
     log('Created new daily ticket time cache');
   }
 
@@ -1266,8 +1311,12 @@ async function getTicketTimeCache() {
 async function saveTicketAccumulatedTime(ticketId, accumulatedMs) {
   const cache = await getTicketTimeCache();
   cache.tickets[ticketId] = accumulatedMs;
-  await chrome.storage.local.set({ ticketTimeCache: cache });
-  log(`Saved accumulated time for ticket #${ticketId}: ${Math.round(accumulatedMs / 1000)}s`);
+
+  const company = await getActiveCompany();
+  if (company) {
+    await updateActiveCompanyData({ ticketTimeCache: cache });
+    log(`Saved accumulated time for ticket #${ticketId}: ${Math.round(accumulatedMs / 1000)}s`);
+  }
 }
 
 /**
@@ -1345,24 +1394,29 @@ async function endTicketTimer() {
   log(`Ended tracking ticket #${ticketId}, session: ${Math.round(sessionDuration / 1000)}s, total today: ${Math.round(totalAccumulated / 1000)}s`);
 
   // Store completed ticket session in history
-  const result = await chrome.storage.local.get(['ticketHistory']);
-  const history = result.ticketHistory || [];
+  const company = await getActiveCompany();
 
-  history.push({
-    ticketId,
-    subject: getTicketSubject(),
-    startTime: state.ticketStartTime,
-    endTime,
-    duration: sessionDuration,
-    totalAccumulated,
-    date: getTodayDateString(),
-  });
+  if (company) {
+    const history = company.data.ticketHistory || [];
 
-  // Keep last 500 ticket sessions
-  await chrome.storage.local.set({
-    ticketHistory: history.slice(-500),
-    activeTicket: null,
-  });
+    history.push({
+      ticketId,
+      subject: getTicketSubject(),
+      startTime: state.ticketStartTime,
+      endTime,
+      duration: sessionDuration,
+      totalAccumulated,
+      date: getTodayDateString(),
+    });
+
+    // Keep last 500 ticket sessions
+    await updateActiveCompanyData({
+      ticketHistory: history.slice(-500)
+    });
+  }
+
+  // Clear active ticket (global state)
+  await chrome.storage.local.set({ activeTicket: null });
 
   // Notify background script to clear alarms
   chrome.runtime.sendMessage({

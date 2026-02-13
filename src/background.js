@@ -27,6 +27,57 @@ const DEFAULT_REMINDER_SETTINGS = {
 const TICKET_ALARM_PREFIX = 'ticket-reminder-';
 
 // ============================================================================
+// STORAGE UTILITIES (for service worker context)
+// ============================================================================
+
+async function getActiveCompany() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+      const activeId = result.activeCompanyId;
+      const companies = result.companies || {};
+
+      if (activeId && companies[activeId]) {
+        resolve({ id: activeId, data: companies[activeId] });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function updateActiveCompanyMetrics(metrics) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+      const companies = result.companies || {};
+      const activeId = result.activeCompanyId;
+
+      if (activeId && companies[activeId]) {
+        companies[activeId].metrics = { ...metrics, lastUpdated: Date.now() };
+        chrome.storage.local.set({ companies }, () => resolve(true));
+      } else {
+        resolve(false);
+      }
+    });
+  });
+}
+
+async function updateActiveCompanyHistory(history) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+      const companies = result.companies || {};
+      const activeId = result.activeCompanyId;
+
+      if (activeId && companies[activeId]) {
+        companies[activeId].history = history;
+        chrome.storage.local.set({ companies }, () => resolve(true));
+      } else {
+        resolve(false);
+      }
+    });
+  });
+}
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
@@ -50,39 +101,44 @@ function createEmptyMetrics() {
 // ============================================================================
 
 async function getMetrics() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['metrics'], (result) => {
-      let metrics = result.metrics || createEmptyMetrics();
+  const company = await getActiveCompany();
 
-      // Check for new day
-      if (metrics.date !== getTodayDateString()) {
-        // Archive and reset
-        archiveMetrics(metrics);
-        metrics = createEmptyMetrics();
-        chrome.storage.local.set({ metrics });
-      }
+  if (!company) {
+    return createEmptyMetrics();
+  }
 
-      resolve(metrics);
-    });
-  });
+  let metrics = company.data.metrics || createEmptyMetrics();
+
+  // Check for new day
+  if (metrics.date !== getTodayDateString()) {
+    // Archive and reset
+    await archiveMetrics(metrics, company.id);
+    metrics = createEmptyMetrics();
+    await updateActiveCompanyMetrics(metrics);
+  }
+
+  return metrics;
 }
 
 async function saveMetrics(metrics) {
   metrics.lastUpdated = Date.now();
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ metrics }, () => {
-      updateBadge(metrics);
-      resolve();
-    });
-  });
+  await updateActiveCompanyMetrics(metrics);
+  updateBadge(metrics);
 }
 
-async function archiveMetrics(oldMetrics) {
+async function archiveMetrics(oldMetrics, companyId) {
   if (!oldMetrics.date) return;
 
   return new Promise((resolve) => {
-    chrome.storage.local.get(['history'], (result) => {
-      const history = result.history || [];
+    chrome.storage.local.get(['companies'], (result) => {
+      const companies = result.companies || {};
+
+      if (!companies[companyId]) {
+        resolve();
+        return;
+      }
+
+      const history = companies[companyId].history || [];
 
       // Don't duplicate
       if (!history.some((h) => h.date === oldMetrics.date)) {
@@ -95,8 +151,10 @@ async function archiveMetrics(oldMetrics) {
         });
       }
 
-      // Keep last 90 days
-      chrome.storage.local.set({ history: history.slice(-90) }, resolve);
+      // Keep last 90 days and update
+      companies[companyId].history = history.slice(-90);
+
+      chrome.storage.local.set({ companies }, resolve);
     });
   });
 }
@@ -410,15 +468,28 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // INSTALLATION HANDLERS
 // ============================================================================
 
-chrome.runtime.onInstalled.addListener((details) => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[ZKT Background] Installed:', details.reason);
 
   // Initialize storage on first install
   if (details.reason === 'install') {
+    const companyId = 'company_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
     chrome.storage.local.set({
-      metrics: createEmptyMetrics(),
-      goals: DEFAULT_GOALS,
-      history: [],
+      companies: {
+        [companyId]: {
+          name: 'Default Company',
+          color: '#5046e5',
+          metrics: createEmptyMetrics(),
+          goals: DEFAULT_GOALS,
+          history: [],
+          ticketTimeCache: { date: getTodayDateString(), tickets: {} },
+          ticketHistory: []
+        }
+      },
+      activeCompanyId: companyId,
+      reminderSettings: DEFAULT_REMINDER_SETTINGS,
+      trackingEnabled: true
     });
   }
 
