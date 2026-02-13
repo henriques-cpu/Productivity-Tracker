@@ -21,6 +21,38 @@
         </div>
         <div class="date-display" id="currentDate"></div>
       </div>
+      <!-- Company Selector -->
+      <div class="company-selector">
+        <button class="company-selector-btn" id="companySelectorBtn">
+          <span class="company-indicator" id="companyIndicator" style="background-color: #5046e5;"></span>
+          <span class="company-name" id="companyName">Loading...</span>
+          <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="company-dropdown" id="companyDropdown">
+          <div class="company-dropdown-header">Select Company</div>
+          <div class="company-list" id="companyList">
+            <!-- Populated dynamically -->
+          </div>
+          <div class="company-dropdown-footer">
+            <button class="company-action-btn" id="newCompanyBtn">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              New Company
+            </button>
+            <button class="company-action-btn" id="manageCompaniesBtn">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                <path d="M12 1V3M12 21V23M4.22 4.22L5.64 5.64M18.36 18.36L19.78 19.78M1 12H3M21 12H23M4.22 19.78L5.64 18.36M18.36 5.64L19.78 4.22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Manage
+            </button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <!-- Status Indicator -->
@@ -341,8 +373,58 @@
     </div>
   </div>
 
+  <!-- Company Management Modal -->
+  <div class="modal" id="companyManagementModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Manage Companies</h2>
+        <button class="modal-close" id="closeCompanyManagement">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="companies-manage-list" id="companiesManageList">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Company Modal -->
+  <div class="modal" id="newCompanyModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Create New Company</h2>
+        <button class="modal-close" id="closeNewCompany">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-item">
+          <label for="newCompanyName">Company Name</label>
+          <input type="text" id="newCompanyName" placeholder="Enter company name" maxlength="50">
+        </div>
+        <div class="setting-item">
+          <label for="newCompanyColor">Color</label>
+          <div class="color-picker" id="colorPicker">
+            <div class="color-option" data-color="#5046e5" style="background-color: #5046e5;"></div>
+            <div class="color-option" data-color="#059669" style="background-color: #059669;"></div>
+            <div class="color-option" data-color="#d97706" style="background-color: #d97706;"></div>
+            <div class="color-option" data-color="#7b1fa2" style="background-color: #7b1fa2;"></div>
+            <div class="color-option" data-color="#0891b2" style="background-color: #0891b2;"></div>
+            <div class="color-option" data-color="#dc2626" style="background-color: #dc2626;"></div>
+            <div class="color-option" data-color="#2563eb" style="background-color: #2563eb;"></div>
+            <div class="color-option" data-color="#ca8a04" style="background-color: #ca8a04;"></div>
+          </div>
+          <input type="hidden" id="newCompanyColor" value="#5046e5">
+        </div>
+        <div class="modal-actions">
+          <button class="cancel-btn" id="cancelNewCompany">Cancel</button>
+          <button class="save-settings-btn" id="saveNewCompany">Create Company</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Chart.js (bundled locally for CSP compliance) -->
   <script src="chart.min.js"></script>
+  <script src="storage-utils.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

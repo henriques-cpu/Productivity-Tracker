@@ -54,52 +54,58 @@ function createEmptyMetrics() {
 }
 
 // ============================================================================
-// STORAGE FUNCTIONS (Direct access - more reliable than messaging)
+// STORAGE FUNCTIONS (Company-scoped using storage utilities)
 // ============================================================================
 
 async function loadFromStorage() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['metrics', 'goals', 'history'], (result) => {
-      const metrics = result.metrics || createEmptyMetrics();
-      const storedGoals = result.goals || DEFAULT_GOALS;
-      const history = result.history || [];
+  // Use StorageUtils from storage-utils.js
+  const company = await StorageUtils.getActiveCompany();
 
-      // Check if it's a new day
-      if (metrics.date !== getTodayDateString()) {
-        // Archive old metrics and create new ones
-        if (metrics.date) {
-          history.push({
-            date: metrics.date,
-            reply: metrics.reply || 0,
-            replyEmail: metrics.replyEmail || 0,
-            replySMS: metrics.replySMS || 0,
-            replyChat: metrics.replyChat || 0,
-            chat: metrics.chat || 0,
-            inbound: metrics.inbound || 0,
-            outbound: metrics.outbound || 0,
-          });
-        }
-        const newMetrics = createEmptyMetrics();
-        chrome.storage.local.set({ metrics: newMetrics, history: history.slice(-90) });
-        resolve({ metrics: newMetrics, goals: storedGoals, history });
-      } else {
-        resolve({ metrics, goals: storedGoals, history });
-      }
+  if (!company) {
+    console.error('[ZKT] No active company found');
+    return { metrics: createEmptyMetrics(), goals: DEFAULT_GOALS, history: [] };
+  }
+
+  const metrics = company.data.metrics || createEmptyMetrics();
+  const storedGoals = company.data.goals || DEFAULT_GOALS;
+  const history = company.data.history || [];
+
+  // Check if it's a new day
+  if (metrics.date !== getTodayDateString()) {
+    // Archive old metrics and create new ones
+    if (metrics.date) {
+      history.push({
+        date: metrics.date,
+        reply: metrics.reply || 0,
+        replyEmail: metrics.replyEmail || 0,
+        replySMS: metrics.replySMS || 0,
+        replyChat: metrics.replyChat || 0,
+        chat: metrics.chat || 0,
+        inbound: metrics.inbound || 0,
+        outbound: metrics.outbound || 0,
+      });
+    }
+    const newMetrics = createEmptyMetrics();
+
+    // Update company data
+    await StorageUtils.updateCompany(company.id, {
+      metrics: newMetrics,
+      history: history.slice(-90)
     });
-  });
+
+    return { metrics: newMetrics, goals: storedGoals, history };
+  } else {
+    return { metrics, goals: storedGoals, history };
+  }
 }
 
 async function saveMetrics(metrics) {
-  return new Promise((resolve) => {
-    metrics.lastUpdated = Date.now();
-    chrome.storage.local.set({ metrics }, resolve);
-  });
+  metrics.lastUpdated = Date.now();
+  return await StorageUtils.saveActiveMetrics(metrics);
 }
 
 async function saveGoals(newGoals) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ goals: newGoals }, resolve);
-  });
+  return await StorageUtils.saveActiveGoals(newGoals);
 }
 
 // ============================================================================
@@ -770,12 +776,63 @@ function setupEventListeners() {
     if (e.target.id === 'reminderModal') closeReminderSettings();
   });
 
+  // Company selector
+  document.getElementById('companySelectorBtn')?.addEventListener('click', toggleCompanyDropdown);
+  document.getElementById('newCompanyBtn')?.addEventListener('click', openNewCompanyModal);
+  document.getElementById('manageCompaniesBtn')?.addEventListener('click', openCompanyManagementModal);
+
+  // New company modal
+  document.getElementById('closeNewCompany')?.addEventListener('click', closeNewCompanyModal);
+  document.getElementById('cancelNewCompany')?.addEventListener('click', closeNewCompanyModal);
+  document.getElementById('saveNewCompany')?.addEventListener('click', createNewCompany);
+
+  // Company management modal
+  document.getElementById('closeCompanyManagement')?.addEventListener('click', closeCompanyManagementModal);
+
+  // Color picker
+  document.querySelectorAll('.color-option').forEach(option => {
+    option.addEventListener('click', () => {
+      selectedNewCompanyColor = option.dataset.color;
+      document.getElementById('newCompanyColor').value = selectedNewCompanyColor;
+      updateColorPickerSelection();
+    });
+  });
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', (e) => {
+    const companySelector = document.getElementById('companySelectorBtn');
+    const companyDropdown = document.getElementById('companyDropdown');
+
+    if (!companySelector?.contains(e.target) && !companyDropdown?.contains(e.target)) {
+      companyDropdown?.classList.remove('active');
+    }
+  });
+
+  // Close new company modal on backdrop click
+  document.getElementById('newCompanyModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'newCompanyModal') closeNewCompanyModal();
+  });
+
+  // Close company management modal on backdrop click
+  document.getElementById('companyManagementModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'companyManagementModal') closeCompanyManagementModal();
+  });
+
   // Listen for storage changes from content script
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.metrics) {
-      currentMetrics = changes.metrics.newValue;
-      updateScorecards(currentMetrics);
-      updateChart(currentMetrics);
+    if (namespace === 'local' && changes.companies) {
+      // Reload data when company data changes
+      loadFromStorage().then(data => {
+        currentMetrics = data.metrics;
+        goals = data.goals;
+        updateScorecards(currentMetrics);
+        updateChart(currentMetrics);
+      });
+    }
+
+    if (namespace === 'local' && changes.activeCompanyId) {
+      // Reload everything when active company changes
+      init();
     }
 
     // Update ticket timer when active ticket changes
@@ -786,6 +843,161 @@ function setupEventListeners() {
 }
 
 // ============================================================================
+// COMPANY MANAGEMENT
+// ============================================================================
+
+let selectedNewCompanyColor = '#5046e5';
+
+async function loadCompanySelector() {
+  const companies = await StorageUtils.getAllCompanies();
+  const activeId = await StorageUtils.getActiveCompanyId();
+
+  if (!activeId || !companies[activeId]) {
+    console.error('[ZKT] No active company found');
+    return;
+  }
+
+  const activeCompany = companies[activeId];
+
+  // Update header display
+  const companyIndicator = document.getElementById('companyIndicator');
+  const companyName = document.getElementById('companyName');
+
+  if (companyIndicator) {
+    companyIndicator.style.backgroundColor = activeCompany.color;
+  }
+  if (companyName) {
+    companyName.textContent = activeCompany.name;
+  }
+
+  // Populate dropdown
+  const companyList = document.getElementById('companyList');
+  if (companyList) {
+    companyList.innerHTML = '';
+
+    Object.entries(companies).forEach(([id, company]) => {
+      const item = document.createElement('div');
+      item.className = 'company-item' + (id === activeId ? ' active' : '');
+      item.innerHTML = `
+        <span class="company-indicator" style="background-color: ${company.color};"></span>
+        <span class="company-item-name">${company.name}</span>
+        ${id === activeId ? '<svg class="check-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+      `;
+      item.addEventListener('click', () => switchCompany(id));
+      companyList.appendChild(item);
+    });
+  }
+}
+
+async function switchCompany(companyId) {
+  await StorageUtils.setActiveCompany(companyId);
+
+  // Close dropdown
+  document.getElementById('companyDropdown')?.classList.remove('active');
+
+  // Reload all data
+  await init();
+}
+
+function toggleCompanyDropdown() {
+  const dropdown = document.getElementById('companyDropdown');
+  dropdown?.classList.toggle('active');
+}
+
+function openNewCompanyModal() {
+  document.getElementById('companyDropdown')?.classList.remove('active');
+  document.getElementById('newCompanyModal')?.classList.add('active');
+  document.getElementById('newCompanyName').value = '';
+  selectedNewCompanyColor = '#5046e5';
+  updateColorPickerSelection();
+}
+
+function closeNewCompanyModal() {
+  document.getElementById('newCompanyModal')?.classList.remove('active');
+}
+
+function updateColorPickerSelection() {
+  document.querySelectorAll('.color-option').forEach(option => {
+    if (option.dataset.color === selectedNewCompanyColor) {
+      option.classList.add('selected');
+    } else {
+      option.classList.remove('selected');
+    }
+  });
+}
+
+async function createNewCompany() {
+  const nameInput = document.getElementById('newCompanyName');
+  const name = nameInput.value.trim();
+
+  if (!name) {
+    alert('Please enter a company name');
+    return;
+  }
+
+  const result = await StorageUtils.createCompany(name, selectedNewCompanyColor);
+  await StorageUtils.setActiveCompany(result.id);
+
+  closeNewCompanyModal();
+  await init();
+}
+
+async function openCompanyManagementModal() {
+  document.getElementById('companyDropdown')?.classList.remove('active');
+
+  const companies = await StorageUtils.getAllCompanies();
+  const activeId = await StorageUtils.getActiveCompanyId();
+
+  const manageList = document.getElementById('companiesManageList');
+  if (manageList) {
+    manageList.innerHTML = '';
+
+    Object.entries(companies).forEach(([id, company]) => {
+      const item = document.createElement('div');
+      item.className = 'company-manage-item';
+      item.innerHTML = `
+        <span class="company-indicator" style="background-color: ${company.color};"></span>
+        <input type="text" class="company-name-input" value="${company.name}" data-company-id="${id}">
+        ${Object.keys(companies).length > 1 ? `<button class="delete-company-btn" data-company-id="${id}">Delete</button>` : ''}
+      `;
+      manageList.appendChild(item);
+    });
+
+    // Add event listeners for name changes
+    manageList.querySelectorAll('.company-name-input').forEach(input => {
+      input.addEventListener('change', async (e) => {
+        const companyId = e.target.dataset.companyId;
+        const newName = e.target.value.trim();
+        if (newName) {
+          await StorageUtils.updateCompany(companyId, { name: newName });
+          await loadCompanySelector();
+        }
+      });
+    });
+
+    // Add event listeners for delete buttons
+    manageList.querySelectorAll('.delete-company-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const companyId = e.target.dataset.companyId;
+        if (confirm('Are you sure you want to delete this company? All data will be lost.')) {
+          const success = await StorageUtils.deleteCompany(companyId);
+          if (success) {
+            closeCompanyManagementModal();
+            await init();
+          }
+        }
+      });
+    });
+  }
+
+  document.getElementById('companyManagementModal')?.classList.add('active');
+}
+
+function closeCompanyManagementModal() {
+  document.getElementById('companyManagementModal')?.classList.remove('active');
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -793,6 +1005,12 @@ async function init() {
   console.log('[ZKT] Initializing popup...');
 
   try {
+    // Migrate to multi-company structure if needed
+    await StorageUtils.migrateToMultiCompany();
+
+    // Load company selector
+    await loadCompanySelector();
+
     // Load data from storage
     const data = await loadFromStorage();
     currentMetrics = data.metrics;

@@ -57,7 +57,7 @@ function initializeEventListeners() {
 
   // Listen for storage changes (real-time updates)
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.metrics || changes.history || changes.goals || changes.ticketTimeCache || changes.ticketHistory) {
+    if (changes.companies || changes.activeCompanyId) {
       loadData();
     }
   });
@@ -66,13 +66,34 @@ function initializeEventListeners() {
 // ===== Data Loading =====
 async function loadData() {
   try {
-    const result = await chrome.storage.local.get(['metrics', 'history', 'goals', 'ticketTimeCache', 'ticketHistory']);
+    // Migrate to multi-company structure if needed
+    await StorageUtils.migrateToMultiCompany();
 
-    currentData.metrics = result.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 };
-    currentData.history = result.history || [];
-    currentData.goals = result.goals || { reply: 20 };
-    currentData.ticketTimeCache = result.ticketTimeCache || { date: getTodayDate(), tickets: {} };
-    currentData.ticketHistory = result.ticketHistory || [];
+    // Get active company data
+    const company = await StorageUtils.getActiveCompany();
+
+    if (!company) {
+      console.error('No active company found');
+      return;
+    }
+
+    // Update company badge
+    const companyIndicator = document.getElementById('companyIndicator');
+    const companyName = document.getElementById('companyName');
+
+    if (companyIndicator) {
+      companyIndicator.style.backgroundColor = company.data.color;
+    }
+    if (companyName) {
+      companyName.textContent = company.data.name;
+    }
+
+    // Load company data
+    currentData.metrics = company.data.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 };
+    currentData.history = company.data.history || [];
+    currentData.goals = company.data.goals || { reply: 20 };
+    currentData.ticketTimeCache = company.data.ticketTimeCache || { date: getTodayDate(), tickets: {} };
+    currentData.ticketHistory = company.data.ticketHistory || [];
 
     updateLastUpdated();
     renderDashboard();
@@ -1074,7 +1095,7 @@ async function saveSettings() {
   };
 
   try {
-    await chrome.storage.local.set({ goals: newGoals });
+    await StorageUtils.saveActiveGoals(newGoals);
     currentData.goals = newGoals;
     closeSettings();
     renderDashboard();
