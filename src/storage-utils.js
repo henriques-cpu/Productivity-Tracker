@@ -43,6 +43,7 @@ function createEmptyCompany(name, color) {
   return {
     name: name || 'New Company',
     color: color || getNextCompanyColor(),
+    zendeskSubdomain: null,
     metrics: {
       date: today,
       reply: 0,
