@@ -145,11 +145,31 @@ function createEmptyMetrics() {
 // COMPANY-SCOPED STORAGE HELPERS
 // ============================================================================
 
-async function getActiveCompany() {
+function getCurrentZendeskSubdomain() {
+  const host = window.location.hostname || '';
+  const match = host.match(/^([^.]+)\.zendesk\.com$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+async function getTrackingCompany() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
-      const activeId = result.activeCompanyId;
       const companies = result.companies || {};
+      const activeId = result.activeCompanyId;
+
+      // Prefer mapped company based on current Zendesk subdomain
+      const currentSubdomain = getCurrentZendeskSubdomain();
+      if (currentSubdomain) {
+        const mappedEntry = Object.entries(companies).find(([, company]) =>
+          (company?.zendeskSubdomain || '').toLowerCase() === currentSubdomain
+        );
+
+        if (mappedEntry) {
+          const [id, data] = mappedEntry;
+          resolve({ id, data });
+          return;
+        }
+      }
 
       if (activeId && companies[activeId]) {
         resolve({ id: activeId, data: companies[activeId] });
@@ -160,14 +180,13 @@ async function getActiveCompany() {
   });
 }
 
-async function updateActiveCompanyData(updates) {
+async function updateCompanyDataById(companyId, updates) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+    chrome.storage.local.get(['companies'], (result) => {
       const companies = result.companies || {};
-      const activeId = result.activeCompanyId;
 
-      if (activeId && companies[activeId]) {
-        companies[activeId] = { ...companies[activeId], ...updates };
+      if (companyId && companies[companyId]) {
+        companies[companyId] = { ...companies[companyId], ...updates };
         chrome.storage.local.set({ companies }, () => resolve(true));
       } else {
         resolve(false);
@@ -438,7 +457,7 @@ async function trackMetric(metricType, channel = null) {
 
   try {
     // Get active company
-    const company = await getActiveCompany();
+    const company = await getTrackingCompany();
 
     if (!company) {
       log('No active company found, skipping tracking');
@@ -463,7 +482,7 @@ async function trackMetric(metricType, channel = null) {
           inbound: metrics.inbound || 0,
           outbound: metrics.outbound || 0,
         });
-        await updateActiveCompanyData({ history: history.slice(-90) });
+        await updateCompanyDataById(company.id, { history: history.slice(-90) });
       }
 
       metrics = createEmptyMetrics();
@@ -483,7 +502,7 @@ async function trackMetric(metricType, channel = null) {
       }
 
       metrics.lastUpdated = Date.now();
-      await updateActiveCompanyData({ metrics });
+      await updateCompanyDataById(company.id, { metrics });
 
       log(`Tracked ${metricType}:`, metrics[metricType]);
       showNotification(metricType);
@@ -1287,7 +1306,7 @@ function getTicketSubject() {
  */
 async function getTicketTimeCache() {
   const today = getTodayDateString();
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
 
   if (!company) {
     return { date: today, tickets: {} };
@@ -1298,7 +1317,7 @@ async function getTicketTimeCache() {
   // If no cache or cache is from a different day, create new one
   if (!cache || cache.date !== today) {
     cache = { date: today, tickets: {} };
-    await updateActiveCompanyData({ ticketTimeCache: cache });
+    await updateCompanyDataById(company.id, { ticketTimeCache: cache });
     log('Created new daily ticket time cache');
   }
 
@@ -1312,9 +1331,9 @@ async function saveTicketAccumulatedTime(ticketId, accumulatedMs) {
   const cache = await getTicketTimeCache();
   cache.tickets[ticketId] = accumulatedMs;
 
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
   if (company) {
-    await updateActiveCompanyData({ ticketTimeCache: cache });
+    await updateCompanyDataById(company.id, { ticketTimeCache: cache });
     log(`Saved accumulated time for ticket #${ticketId}: ${Math.round(accumulatedMs / 1000)}s`);
   }
 }
@@ -1394,7 +1413,7 @@ async function endTicketTimer() {
   log(`Ended tracking ticket #${ticketId}, session: ${Math.round(sessionDuration / 1000)}s, total today: ${Math.round(totalAccumulated / 1000)}s`);
 
   // Store completed ticket session in history
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
 
   if (company) {
     const history = company.data.ticketHistory || [];
@@ -1410,7 +1429,7 @@ async function endTicketTimer() {
     });
 
     // Keep last 500 ticket sessions
-    await updateActiveCompanyData({
+    await updateCompanyDataById(company.id, {
       ticketHistory: history.slice(-500)
     });
   }
