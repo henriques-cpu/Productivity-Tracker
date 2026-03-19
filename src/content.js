@@ -632,7 +632,21 @@ function handleClick(event) {
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
 
-  // NOTE: Reply tracking is now done via network interception, not button clicks
+  // REPLY FALLBACK: track via click if network interception misses a reply flow
+  // Debounce in trackMetric prevents double counting when API detection also fires.
+  if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS) ||
+      (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT))) {
+    log('Reply submit clicked (fallback detection)');
+    setTimeout(() => {
+      const replyMode = isPublicReplyMode();
+      if (replyMode.isPublic) {
+        trackMetric('reply', replyMode.channel);
+      } else {
+        log('Reply click detected but composer is internal note - not tracking');
+      }
+    }, 300);
+    return;
+  }
 
   // Check for Chat End buttons
   if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
@@ -999,7 +1013,7 @@ function analyzeGraphQLResponse(response, requestBody) {
 
   // If we can't determine from response or request, check UI state
   log('Could not determine public flag from response or request, checking UI');
-  return isPublicReplyMode();
+  return isPublicReplyMode().isPublic;
 }
 
 /**
@@ -1112,7 +1126,7 @@ function analyzeRestApiResponse(response, requestBody) {
 
   // Last resort: check UI state
   log('Could not determine public flag from REST response, checking UI');
-  return isPublicReplyMode();
+  return isPublicReplyMode().isPublic;
 }
 
 // ============================================================================
@@ -1131,11 +1145,15 @@ window.addEventListener('message', (event) => {
     // Analyze response to detect public reply submissions
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
-      log('✓ Public reply confirmed via response - tracking');
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
-      log('Channel detection result:', replyMode);
-      trackMetric('reply', replyMode.channel);
+      if (replyMode.isPublic) {
+        log('✓ Public reply confirmed via response - tracking');
+        log('Channel detection result:', replyMode);
+        trackMetric('reply', replyMode.channel);
+      } else {
+        log('Response indicated reply, but UI is internal note - not tracking');
+      }
     }
   }
 
