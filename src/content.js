@@ -110,6 +110,7 @@ const state = {
   isCallActive: false,
   lastEventTime: {},
   debounceMs: 2000, // Prevent double-counting within 2 seconds
+  recentReplyEventIds: new Map(),
   // Ticket time tracking
   currentTicketId: null,
   ticketStartTime: null,
@@ -208,6 +209,27 @@ function shouldDebounce(eventType) {
   }
 
   state.lastEventTime[eventType] = now;
+  return false;
+}
+
+function isDuplicateReplyEvent(eventId) {
+  if (!eventId) return false;
+
+  const now = Date.now();
+  const ttlMs = 5 * 60 * 1000; // 5 minutes
+
+  for (const [id, ts] of state.recentReplyEventIds.entries()) {
+    if (now - ts > ttlMs) {
+      state.recentReplyEventIds.delete(id);
+    }
+  }
+
+  if (state.recentReplyEventIds.has(eventId)) {
+    log(`Duplicate reply event ignored: ${eventId}`);
+    return true;
+  }
+
+  state.recentReplyEventIds.set(eventId, now);
   return false;
 }
 
@@ -925,6 +947,16 @@ function analyzeApiResponse(url, response, requestBody) {
   }
 
   return false;
+}
+
+function extractReplyEventId(url, response) {
+  if (response?.comment?.id) return `rest-comment-${response.comment.id}`;
+  if (response?.ticket?.latest_comment?.id) return `rest-comment-${response.ticket.latest_comment.id}`;
+
+  const convoEventId = response?.data?.ticket?.conversationEvents?.edges?.[0]?.node?.id;
+  if (convoEventId) return `gql-event-${convoEventId}`;
+
+  return null;
 }
 
 /**
