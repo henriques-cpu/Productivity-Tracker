@@ -636,12 +636,6 @@ function handleClick(event) {
   // Debounce in trackMetric prevents double counting when API detection also fires.
   if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS) ||
       (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT))) {
-    const ticketId = getCurrentTicketId();
-    if (!ticketId) {
-      log('Reply submit click ignored: no active ticket context');
-      return;
-    }
-
     log('Reply submit clicked (fallback detection)');
     setTimeout(() => {
       const replyMode = isPublicReplyMode();
