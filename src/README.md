@@ -7,6 +7,7 @@ A Chrome extension for tracking Customer Support metrics in real-time with a Pow
 - **Automatic Tracking**: Detects replies, chats, and calls directly from the Zendesk interface
 - **Manual Tracking**: Fallback buttons for when automatic detection doesn't work
 - **Power BI-style Dashboard**: Beautiful dark-themed popup with scorecards and charts
+- **Per-Company Zendesk Routing**: Auto-routes tracking data to the mapped company based on Zendesk subdomain
 - **Daily Goals**: Set and track progress toward your daily targets
 - **CSV Export**: Export your metrics to CSV for Google Sheets/Excel
 - **Context Menu**: Right-click on Zendesk pages to quickly log metrics
@@ -54,6 +55,17 @@ On any Zendesk page, right-click and select:
 2. Click the gear icon in the top right
 3. Enter your daily goals
 4. Click "Save Settings"
+
+### Multi-Company Tracking
+
+If you use multiple Zendesk accounts/brands:
+
+1. Open the relevant Zendesk account in the active browser tab
+2. Open the extension popup
+3. Select the company profile from the company dropdown
+
+The extension will remember that Zendesk subdomain for the selected company and
+automatically route future tracking events from that subdomain to that company.
 
 ### Exporting Data
 

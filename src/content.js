@@ -145,11 +145,31 @@ function createEmptyMetrics() {
 // COMPANY-SCOPED STORAGE HELPERS
 // ============================================================================
 
-async function getActiveCompany() {
+function getCurrentZendeskSubdomain() {
+  const host = window.location.hostname || '';
+  const match = host.match(/^([^.]+)\.zendesk\.com$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+async function getTrackingCompany() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
-      const activeId = result.activeCompanyId;
       const companies = result.companies || {};
+      const activeId = result.activeCompanyId;
+
+      // Prefer mapped company based on current Zendesk subdomain
+      const currentSubdomain = getCurrentZendeskSubdomain();
+      if (currentSubdomain) {
+        const mappedEntry = Object.entries(companies).find(([, company]) =>
+          (company?.zendeskSubdomain || '').toLowerCase() === currentSubdomain
+        );
+
+        if (mappedEntry) {
+          const [id, data] = mappedEntry;
+          resolve({ id, data });
+          return;
+        }
+      }
 
       if (activeId && companies[activeId]) {
         resolve({ id: activeId, data: companies[activeId] });
@@ -160,14 +180,13 @@ async function getActiveCompany() {
   });
 }
 
-async function updateActiveCompanyData(updates) {
+async function updateCompanyDataById(companyId, updates) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
+    chrome.storage.local.get(['companies'], (result) => {
       const companies = result.companies || {};
-      const activeId = result.activeCompanyId;
 
-      if (activeId && companies[activeId]) {
-        companies[activeId] = { ...companies[activeId], ...updates };
+      if (companyId && companies[companyId]) {
+        companies[companyId] = { ...companies[companyId], ...updates };
         chrome.storage.local.set({ companies }, () => resolve(true));
       } else {
         resolve(false);
@@ -438,7 +457,7 @@ async function trackMetric(metricType, channel = null) {
 
   try {
     // Get active company
-    const company = await getActiveCompany();
+    const company = await getTrackingCompany();
 
     if (!company) {
       log('No active company found, skipping tracking');
@@ -463,7 +482,7 @@ async function trackMetric(metricType, channel = null) {
           inbound: metrics.inbound || 0,
           outbound: metrics.outbound || 0,
         });
-        await updateActiveCompanyData({ history: history.slice(-90) });
+        await updateCompanyDataById(company.id, { history: history.slice(-90) });
       }
 
       metrics = createEmptyMetrics();
@@ -483,7 +502,7 @@ async function trackMetric(metricType, channel = null) {
       }
 
       metrics.lastUpdated = Date.now();
-      await updateActiveCompanyData({ metrics });
+      await updateCompanyDataById(company.id, { metrics });
 
       log(`Tracked ${metricType}:`, metrics[metricType]);
       showNotification(metricType);
@@ -613,7 +632,27 @@ function handleClick(event) {
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
 
-  // NOTE: Reply tracking is now done via network interception, not button clicks
+  // REPLY FALLBACK: track via click if network interception misses a reply flow
+  // Debounce in trackMetric prevents double counting when API detection also fires.
+  if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS) ||
+      (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT))) {
+    const ticketId = getCurrentTicketId();
+    if (!ticketId) {
+      log('Reply submit click ignored: no active ticket context');
+      return;
+    }
+
+    log('Reply submit clicked (fallback detection)');
+    setTimeout(() => {
+      const replyMode = isPublicReplyMode();
+      if (replyMode.isPublic) {
+        trackMetric('reply', replyMode.channel);
+      } else {
+        log('Reply click detected but composer is internal note - not tracking');
+      }
+    }, 300);
+    return;
+  }
 
   // Check for Chat End buttons
   if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
@@ -980,7 +1019,7 @@ function analyzeGraphQLResponse(response, requestBody) {
 
   // If we can't determine from response or request, check UI state
   log('Could not determine public flag from response or request, checking UI');
-  return isPublicReplyMode();
+  return isPublicReplyMode().isPublic;
 }
 
 /**
@@ -1093,7 +1132,7 @@ function analyzeRestApiResponse(response, requestBody) {
 
   // Last resort: check UI state
   log('Could not determine public flag from REST response, checking UI');
-  return isPublicReplyMode();
+  return isPublicReplyMode().isPublic;
 }
 
 // ============================================================================
@@ -1112,11 +1151,15 @@ window.addEventListener('message', (event) => {
     // Analyze response to detect public reply submissions
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
-      log('✓ Public reply confirmed via response - tracking');
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
-      log('Channel detection result:', replyMode);
-      trackMetric('reply', replyMode.channel);
+      if (replyMode.isPublic) {
+        log('✓ Public reply confirmed via response - tracking');
+        log('Channel detection result:', replyMode);
+        trackMetric('reply', replyMode.channel);
+      } else {
+        log('Response indicated reply, but UI is internal note - not tracking');
+      }
     }
   }
 
@@ -1287,7 +1330,7 @@ function getTicketSubject() {
  */
 async function getTicketTimeCache() {
   const today = getTodayDateString();
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
 
   if (!company) {
     return { date: today, tickets: {} };
@@ -1298,7 +1341,7 @@ async function getTicketTimeCache() {
   // If no cache or cache is from a different day, create new one
   if (!cache || cache.date !== today) {
     cache = { date: today, tickets: {} };
-    await updateActiveCompanyData({ ticketTimeCache: cache });
+    await updateCompanyDataById(company.id, { ticketTimeCache: cache });
     log('Created new daily ticket time cache');
   }
 
@@ -1312,9 +1355,9 @@ async function saveTicketAccumulatedTime(ticketId, accumulatedMs) {
   const cache = await getTicketTimeCache();
   cache.tickets[ticketId] = accumulatedMs;
 
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
   if (company) {
-    await updateActiveCompanyData({ ticketTimeCache: cache });
+    await updateCompanyDataById(company.id, { ticketTimeCache: cache });
     log(`Saved accumulated time for ticket #${ticketId}: ${Math.round(accumulatedMs / 1000)}s`);
   }
 }
@@ -1394,7 +1437,7 @@ async function endTicketTimer() {
   log(`Ended tracking ticket #${ticketId}, session: ${Math.round(sessionDuration / 1000)}s, total today: ${Math.round(totalAccumulated / 1000)}s`);
 
   // Store completed ticket session in history
-  const company = await getActiveCompany();
+  const company = await getTrackingCompany();
 
   if (company) {
     const history = company.data.ticketHistory || [];
@@ -1410,7 +1453,7 @@ async function endTicketTimer() {
     });
 
     // Keep last 500 ticket sessions
-    await updateActiveCompanyData({
+    await updateCompanyDataById(company.id, {
       ticketHistory: history.slice(-500)
     });
   }
