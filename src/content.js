@@ -654,17 +654,19 @@ function handleClick(event) {
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
 
-  // Reply clicks are informational only.
-  // Tracking a reply is API-confirmed only to avoid false positives.
+  // REPLY FALLBACK: track via click if network interception misses a reply flow
+  // Debounce in trackMetric prevents double counting when API detection also fires.
   if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS) ||
       (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT))) {
-    const ticketId = getCurrentTicketId();
-    if (!ticketId) {
-      log('Reply submit click ignored: no active ticket context');
-      return;
-    }
-
-    log('Reply submit clicked on ticket (awaiting API confirmation)');
+    log('Reply submit clicked (fallback detection)');
+    setTimeout(() => {
+      const replyMode = isPublicReplyMode();
+      if (replyMode.isPublic) {
+        trackMetric('reply', replyMode.channel);
+      } else {
+        log('Reply click detected but composer is internal note - not tracking');
+      }
+    }, 300);
     return;
   }
 
@@ -1175,18 +1177,10 @@ window.addEventListener('message', (event) => {
     // Analyze response to detect public reply submissions
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
-      const replyEventId = extractReplyEventId(url, response);
-      if (isDuplicateReplyEvent(replyEventId)) {
-        return;
-      }
-
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
       if (replyMode.isPublic) {
         log('✓ Public reply confirmed via response - tracking');
-        if (replyEventId) {
-          log('Reply event id:', replyEventId);
-        }
         log('Channel detection result:', replyMode);
         trackMetric('reply', replyMode.channel);
       } else {
