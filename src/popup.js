@@ -891,12 +891,41 @@ async function loadCompanySelector() {
 
 async function switchCompany(companyId) {
   await StorageUtils.setActiveCompany(companyId);
+  await linkActiveZendeskSubdomainToCompany(companyId);
 
   // Close dropdown
   document.getElementById('companyDropdown')?.classList.remove('active');
 
   // Reload all data
   await init();
+}
+
+function getZendeskSubdomainFromUrl(url) {
+  if (!url) return null;
+
+  try {
+    const hostname = new URL(url).hostname;
+    const match = hostname.match(/^([^.]+)\.zendesk\.com$/i);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function linkActiveZendeskSubdomainToCompany(companyId) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const subdomain = getZendeskSubdomainFromUrl(tab?.url);
+
+    if (!subdomain) {
+      return;
+    }
+
+    await StorageUtils.updateCompany(companyId, { zendeskSubdomain: subdomain });
+    console.log(`[ZKT] Linked company ${companyId} to Zendesk subdomain: ${subdomain}`);
+  } catch (error) {
+    console.warn('[ZKT] Could not link Zendesk subdomain to company:', error);
+  }
 }
 
 function toggleCompanyDropdown() {
