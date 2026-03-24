@@ -111,6 +111,7 @@ const state = {
   lastEventTime: {},
   debounceMs: 2000, // Prevent double-counting within 2 seconds
   recentReplyEventIds: new Map(),
+  lastReplyTrackedAt: 0,
   // Ticket time tracking
   currentTicketId: null,
   ticketStartTime: null,
@@ -231,6 +232,24 @@ function isDuplicateReplyEvent(eventId) {
 
   state.recentReplyEventIds.set(eventId, now);
   return false;
+}
+
+function trackReplyWithDedup(channel, eventId, source = 'unknown') {
+  if (eventId && isDuplicateReplyEvent(eventId)) {
+    return;
+  }
+
+  // Fallback signals (request/websocket/click) can arrive after primary API response.
+  // Suppress them briefly to prevent counting the same submitted reply twice.
+  const isFallbackSource = source !== 'api-response';
+  const msSinceLastReply = Date.now() - (state.lastReplyTrackedAt || 0);
+  if (isFallbackSource && msSinceLastReply < 4000) {
+    log(`Suppressed fallback reply tracking (${source}) ${msSinceLastReply}ms after last tracked reply`);
+    return;
+  }
+
+  state.lastReplyTrackedAt = Date.now();
+  trackMetric('reply', channel);
 }
 
 // ============================================================================
@@ -662,7 +681,7 @@ function handleClick(event) {
     setTimeout(() => {
       const replyMode = isPublicReplyMode();
       if (replyMode.isPublic) {
-        trackMetric('reply', replyMode.channel);
+        trackReplyWithDedup(replyMode.channel, null, 'click-fallback');
       } else {
         log('Reply click detected but composer is internal note - not tracking');
       }
@@ -1177,12 +1196,13 @@ window.addEventListener('message', (event) => {
     // Analyze response to detect public reply submissions
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
+      const eventId = extractReplyEventId(url, response);
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
       if (replyMode.isPublic) {
         log('✓ Public reply confirmed via response - tracking');
         log('Channel detection result:', replyMode);
-        trackMetric('reply', replyMode.channel);
+        trackReplyWithDedup(replyMode.channel, eventId, 'api-response');
       } else {
         log('Response indicated reply, but UI is internal note - not tracking');
       }
@@ -1230,7 +1250,7 @@ window.addEventListener('message', (event) => {
 
           if (replyMode.isPublic) {
             log(`✓ Public ticket submission via WebSocket (${replyMode.channel}) - tracking`);
-            trackMetric('reply', replyMode.channel);
+            trackReplyWithDedup(replyMode.channel, null, 'websocket-fallback');
           } else {
             log('✗ Internal note via WebSocket - not tracking');
           }
@@ -1290,7 +1310,7 @@ function checkAndTrackReply(operationName, variables) {
       log('Public reply detected - tracking');
       // Get channel information from the UI
       const replyMode = isPublicReplyMode();
-      trackMetric('reply', replyMode.channel);
+      trackReplyWithDedup(replyMode.channel, null, 'graphql-request-fallback');
     } else {
       log('Internal note detected - not tracking');
     }
