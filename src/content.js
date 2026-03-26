@@ -18,26 +18,6 @@
 // ============================================================================
 
 const SELECTORS = {
-  // TICKET REPLIES - Submit/Send button selectors
-  REPLY_SUBMIT_BUTTONS: [
-    // Zendesk Agent Workspace - Submit dropdown menu items only (not the dropdown trigger)
-    '[data-test-id^="submit_button-menu-"]:not([data-test-id="submit_button-menu-button"])',   // Submit dropdown menu items (Submit as Pending, etc.)
-    // Other Zendesk submit buttons (fallbacks for different UI versions)
-    '[data-test-id="submit-button"]',
-    '[data-test-id="ticket-submit-button"]',
-    '[data-test-id="omni-button-submit"]',
-    '[data-test-id="composer-submit-button"]',
-    '[data-test-id="pane-footer"] button[type="submit"]',
-    // Generic button selectors
-    'button[type="submit"]',
-    '[aria-label="Submit"]',
-    '[aria-label="Submit as"]',
-    '[aria-label="Send"]',
-    // Agent Workspace
-    '.ticket-resolution-footer button[type="submit"]',
-    'footer[data-test-id] button[type="submit"]',
-  ],
-
   // Channel switcher to detect Public Reply vs Internal Note
   CHANNEL_SWITCHER: '[data-test-id="omnichannel-channel-switcher-button"]',
 
@@ -50,9 +30,6 @@ const SELECTORS = {
     'Chat',
     'Messaging',
   ],
-
-  // Text patterns to match in buttons (case-insensitive)
-  REPLY_BUTTON_TEXT: ['submit', 'send', 'submit as'],
 
   // CHAT - End chat buttons and indicators
   CHAT_END_BUTTONS: [
@@ -234,17 +211,15 @@ function isDuplicateReplyEvent(eventId) {
   return false;
 }
 
-function trackReplyWithDedup(channel, eventId, source = 'unknown') {
+function trackReplyWithDedup(channel, eventId) {
   if (eventId && isDuplicateReplyEvent(eventId)) {
     return;
   }
 
-  // Fallback signals (request/websocket/click) can arrive after primary API response.
-  // Suppress them briefly to prevent counting the same submitted reply twice.
-  const isFallbackSource = source !== 'api-response';
+  // Universal time-based dedup: only one reply tracked per 5-second window.
   const msSinceLastReply = Date.now() - (state.lastReplyTrackedAt || 0);
-  if (isFallbackSource && msSinceLastReply < 4000) {
-    log(`Suppressed fallback reply tracking (${source}) ${msSinceLastReply}ms after last tracked reply`);
+  if (msSinceLastReply < 5000) {
+    log(`Suppressed duplicate reply tracking ${msSinceLastReply}ms after last tracked reply`);
     return;
   }
 
@@ -252,136 +227,9 @@ function trackReplyWithDedup(channel, eventId, source = 'unknown') {
   trackMetric('reply', channel);
 }
 
-// ============================================================================
-// NETWORK INTERCEPTION - Track actual reply submissions
-// ============================================================================
-
-/**
- * Check if API request is a reply submission and if it's public
- */
-function isPublicReplyRequest(url, method, payload) {
-  if (method !== 'POST') {
-    return null; // Not a POST request
-  }
-
-  // Parse payload to check if it's a reply/comment
-  try {
-    let data = payload;
-
-    // If payload is a string, try to parse it
-    if (typeof payload === 'string') {
-      data = JSON.parse(payload);
-    }
-
-    // Handle GraphQL API (modern Zendesk)
-    if (url.includes('/api/graphql')) {
-      const operationName = data?.operationName || '';
-      const variables = data?.variables || {};
-
-      if (DEBUG_MODE) {
-        log('GraphQL request detected:', { operationName, variables });
-      }
-
-      // Check if this is a comment/reply mutation
-      // Common GraphQL mutation names for comments/replies
-      const replyOperations = [
-        'sendmessage',
-        'createmessage',
-        'addcomment',
-        'createcomment',
-        'submitticket',
-        'updateticket',
-        'sendreply',
-        'createreply',
-      ];
-
-      const isReplyOperation = replyOperations.some(op =>
-        operationName.toLowerCase().includes(op)
-      );
-
-      if (!isReplyOperation) {
-        return null; // Not a reply operation
-      }
-
-      if (DEBUG_MODE) {
-        log('Reply operation detected:', { operationName, variables });
-      }
-
-      // Check if the comment/message is public
-      // GraphQL variables can have different structures
-      const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
-
-      if (message) {
-        // Check for isPublic, public, or isInternal fields
-        if (message.isPublic !== undefined) {
-          return message.isPublic === true;
-        }
-        if (message.public !== undefined) {
-          return message.public === true;
-        }
-        if (message.isInternal !== undefined) {
-          return message.isInternal === false; // isInternal: false means it's public
-        }
-      }
-
-      // Check top-level variables
-      if (variables.isPublic !== undefined) {
-        return variables.isPublic === true;
-      }
-      if (variables.public !== undefined) {
-        return variables.public === true;
-      }
-      if (variables.isInternal !== undefined) {
-        return variables.isInternal === false;
-      }
-
-      // Default to true if we can't determine (safer to track)
-      if (DEBUG_MODE) {
-        log('Could not determine public/private from GraphQL, defaulting to public', variables);
-      }
-      return true;
-    }
-
-    // Handle REST API (legacy Zendesk)
-    const replyEndpoints = [
-      '/api/v2/tickets/',
-      '/api/v2/channels/voice/tickets/',
-      'api/lotus/tickets/',
-      'api/v2/any_channel/tickets/',
-    ];
-
-    const isReplyEndpoint = replyEndpoints.some(endpoint => url.includes(endpoint)) &&
-                            (url.includes('/comments') || url.includes('/comment'));
-
-    if (isReplyEndpoint) {
-      if (DEBUG_MODE) {
-        log('REST reply API call detected:', { url, payload });
-      }
-
-      // Check various payload structures Zendesk uses
-      const comment = data?.comment || data?.ticket?.comment || data;
-
-      // If public field exists, use it directly
-      if (comment?.public !== undefined) {
-        return comment.public === true;
-      }
-
-      return true; // Default to tracking
-    }
-
-    return null; // Not a reply request
-  } catch (e) {
-    if (DEBUG_MODE) {
-      log('Error parsing reply payload:', e);
-    }
-    return null; // Don't track if we can't parse
-  }
-}
-
-// NOTE: Fetch and XHR interception is now handled in inject.js (runs in page context)
-// Content scripts run in an isolated world and cannot intercept page-level fetch/XHR calls
-// The inject.js script intercepts responses (more reliable than requests) and forwards
-// them via postMessage to this content script for analysis.
+// NOTE: Fetch and XHR interception is handled in inject.js (runs in page context).
+// Content scripts run in an isolated world and cannot intercept page-level fetch/XHR calls.
+// inject.js intercepts responses and forwards them via postMessage for analysis here.
 
 /**
  * Check if element matches any selector in list
@@ -673,22 +521,6 @@ function handleClick(event) {
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
 
-  // REPLY FALLBACK: track via click if network interception misses a reply flow
-  // Debounce in trackMetric prevents double counting when API detection also fires.
-  if (matchesAnySelector(target, SELECTORS.REPLY_SUBMIT_BUTTONS) ||
-      (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.REPLY_BUTTON_TEXT))) {
-    log('Reply submit clicked (fallback detection)');
-    setTimeout(() => {
-      const replyMode = isPublicReplyMode();
-      if (replyMode.isPublic) {
-        trackReplyWithDedup(replyMode.channel, null, 'click-fallback');
-      } else {
-        log('Reply click detected but composer is internal note - not tracking');
-      }
-    }, 300);
-    return;
-  }
-
   // Check for Chat End buttons
   if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
     log('End chat button clicked (selector match)');
@@ -751,9 +583,6 @@ function setupMutationObserver() {
           state.isCallActive = true;
         }
 
-        // DOM OBSERVATION: Check for newly added comments/replies (FALLBACK detection)
-        // This provides visual confirmation that a reply was actually submitted
-        detectNewReplyInDOM(node);
       }
     }
   });
@@ -765,63 +594,6 @@ function setupMutationObserver() {
 
   log('MutationObserver started');
   return observer;
-}
-
-/**
- * Detect newly added reply/comment elements in DOM (fallback detection method)
- * This runs when the mutation observer detects new DOM nodes
- */
-function detectNewReplyInDOM(node) {
-  // Check if this node or any child is a comment/event element
-  // Common selectors for Zendesk Agent Workspace comments:
-  // - [data-test-id*="comment"]
-  // - [data-test-id*="event"]
-  // - [data-garden-id*="typography.paragraph"] (comment text)
-  // - Elements with class containing "event" or "comment"
-
-  const isCommentElement = node.matches?.(
-    '[data-test-id*="comment"], ' +
-    '[data-test-id*="event"], ' +
-    '[data-test-id*="ticket-event"], ' +
-    '[class*="Comment"], ' +
-    '[class*="Event"]'
-  );
-
-  // Also check children
-  const hasCommentChild = node.querySelector?.(
-    '[data-test-id*="comment"], ' +
-    '[data-test-id*="event"], ' +
-    '[data-test-id*="ticket-event"]'
-  );
-
-  if (isCommentElement || hasCommentChild) {
-    const commentNode = isCommentElement ? node : hasCommentChild;
-
-    // Check if this is an internal note (has "Internal" badge)
-    const hasInternalBadge = commentNode.textContent?.includes('Internal') ||
-                             commentNode.querySelector?.('[data-test-id*="internal"]') ||
-                             commentNode.querySelector?.('[aria-label*="Internal"]');
-
-    // Check if this is an agent comment (not customer message)
-    // Look for agent avatar indicators or "Henrique" (agent name from screenshot)
-    const isAgentComment = commentNode.querySelector?.(
-      '[data-test-id*="agent"], ' +
-      '[data-test-id*="author"], ' +
-      '[class*="Agent"]'
-    );
-
-    // Only track if it's an agent comment and NOT internal
-    if (isAgentComment && !hasInternalBadge) {
-      // Use a small delay to avoid double-counting with API detection
-      setTimeout(() => {
-        log('DOM: New public reply element detected (fallback confirmation)');
-        // Don't track here - API response detection should handle it
-        // This is just for logging/debugging
-      }, 100);
-    } else if (hasInternalBadge) {
-      log('DOM: Internal note detected - not tracking');
-    }
-  }
 }
 
 // ============================================================================
@@ -1202,120 +974,14 @@ window.addEventListener('message', (event) => {
       if (replyMode.isPublic) {
         log('✓ Public reply confirmed via response - tracking');
         log('Channel detection result:', replyMode);
-        trackReplyWithDedup(replyMode.channel, eventId, 'api-response');
+        trackReplyWithDedup(replyMode.channel, eventId);
       } else {
         log('Response indicated reply, but UI is internal note - not tracking');
       }
     }
   }
 
-  // Handle GraphQL requests from fetch (FALLBACK - less reliable)
-  if (event.data.type === 'ZKT_GRAPHQL_REQUEST') {
-    const { operationName, variables } = event.data.data;
-
-    log('GraphQL request from page:', { operationName, variables });
-
-    checkAndTrackReply(operationName, variables);
-  }
-
-  // Handle WebSocket messages (FALLBACK - less reliable)
-  if (event.data.type === 'ZKT_WEBSOCKET_MESSAGE') {
-    const { payload } = event.data.data;
-
-    // Check for Zendesk custom WebSocket protocol (not GraphQL)
-    if (payload && payload.type) {
-      const msgType = payload.type;
-      const status = payload.status || '';
-      const value = payload.value || {};
-
-      // Log for debugging
-      if (DEBUG_MODE && msgType !== 'PING' && msgType !== 'PONG') {
-        log('WebSocket message:', { type: msgType, status });
-      }
-
-      // Check if this is a ticket update/submission message
-      // Look for messages with specific status patterns
-      if (msgType === 'call' && status.includes('/tickets/')) {
-        log('Ticket interaction detected:', { type: msgType, status, value });
-
-        // Check for completion/submission indicators in the status
-        // "beginPath" = start of edit (don't track)
-        // "commitPath" = submission (track this!)
-        // "endPath" = end of operation (possibly track)
-        // "submit" = submission (track this!)
-
-        if (status.includes('commitPath') || status.includes('endPath') || status.includes('submit')) {
-          // CRITICAL FIX: Check if reply mode is public before tracking
-          const replyMode = isPublicReplyMode();
-
-          if (replyMode.isPublic) {
-            log(`✓ Public ticket submission via WebSocket (${replyMode.channel}) - tracking`);
-            trackReplyWithDedup(replyMode.channel, null, 'websocket-fallback');
-          } else {
-            log('✗ Internal note via WebSocket - not tracking');
-          }
-        } else if (status.includes('beginPath')) {
-          log('Ticket edit started (not submission) - not tracking');
-        } else {
-          log('Unknown ticket operation:', status);
-        }
-      }
-    }
-
-    // Also check for standard GraphQL format (fallback)
-    if (payload && payload.operationName) {
-      checkAndTrackReply(payload.operationName, payload.variables);
-    }
-  }
 });
-
-/**
- * Check if operation is a reply and track if public
- */
-function checkAndTrackReply(operationName, variables) {
-  // Check if this is a reply operation
-  const replyOperations = [
-    'sendmessage',
-    'createmessage',
-    'addcomment',
-    'createcomment',
-    'submitticket',
-    'updateticket',
-    'sendreply',
-    'createreply',
-  ];
-
-  const isReplyOperation = replyOperations.some(op =>
-    operationName.toLowerCase().includes(op)
-  );
-
-  if (isReplyOperation) {
-    log('Reply operation detected:', { operationName, variables });
-
-    // Check if public
-    const message = variables?.message || variables?.comment || variables?.input?.message || variables?.input?.comment;
-    let isPublic = true; // Default to public
-
-    if (message) {
-      if (message.isPublic !== undefined) {
-        isPublic = message.isPublic === true;
-      } else if (message.public !== undefined) {
-        isPublic = message.public === true;
-      } else if (message.isInternal !== undefined) {
-        isPublic = message.isInternal === false;
-      }
-    }
-
-    if (isPublic) {
-      log('Public reply detected - tracking');
-      // Get channel information from the UI
-      const replyMode = isPublicReplyMode();
-      trackReplyWithDedup(replyMode.channel, null, 'graphql-request-fallback');
-    } else {
-      log('Internal note detected - not tracking');
-    }
-  }
-}
 
 // ============================================================================
 // TICKET TIME TRACKING
