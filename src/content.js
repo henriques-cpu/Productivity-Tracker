@@ -441,15 +441,7 @@ function showNotification(metricType) {
 
   // Add animation styles if not present
   if (!document.getElementById('zkt-styles')) {
-    const styles = document.createElement('style');
-    styles.id = 'zkt-styles';
-    styles.textContent = `
-      @keyframes zkt-slide-in {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-      }
-    `;
-    document.head.appendChild(styles);
+    injectStyles();
   }
 
   // Remove existing notification
@@ -460,6 +452,296 @@ function showNotification(metricType) {
 
   // Remove after 2.5 seconds
   setTimeout(() => notification.remove(), 2500);
+}
+
+// ============================================================================
+// STYLES
+// ============================================================================
+
+function injectStyles() {
+  if (document.getElementById('zkt-styles')) return;
+  const styles = document.createElement('style');
+  styles.id = 'zkt-styles';
+  styles.textContent = `
+    @keyframes zkt-slide-in {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes zkt-popup-in {
+      from { transform: translateY(20px) scale(0.95); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    #zkt-time-popup {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 999998;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      animation: zkt-popup-in 0.3s ease-out;
+      user-select: none;
+    }
+    #zkt-time-popup .zkt-popup-card {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
+      overflow: hidden;
+      min-width: 240px;
+      max-width: 320px;
+      cursor: move;
+    }
+    #zkt-time-popup .zkt-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.05);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    #zkt-time-popup .zkt-popup-header-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #9c27b0;
+    }
+    #zkt-time-popup .zkt-pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4caf50;
+      animation: zkt-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes zkt-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    #zkt-time-popup .zkt-popup-close {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    #zkt-time-popup .zkt-popup-close:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.1);
+    }
+    #zkt-time-popup .zkt-popup-body {
+      padding: 12px;
+    }
+    #zkt-time-popup .zkt-ticket-id {
+      font-size: 12px;
+      color: #9c27b0;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    #zkt-time-popup .zkt-ticket-subject {
+      font-size: 12px;
+      color: #aaa;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 10px;
+    }
+    #zkt-time-popup .zkt-timer-display {
+      font-size: 32px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #fff;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+    #zkt-time-popup .zkt-timer-label {
+      font-size: 10px;
+      color: #888;
+      text-align: center;
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #zkt-time-popup.zkt-minimized .zkt-popup-card {
+      min-width: auto;
+    }
+    #zkt-time-popup.zkt-minimized .zkt-popup-body {
+      display: none;
+    }
+    #zkt-time-popup.zkt-minimized .zkt-popup-header {
+      border-bottom: none;
+    }
+    #zkt-time-popup .zkt-popup-minimize {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    #zkt-time-popup .zkt-popup-minimize:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.1);
+    }
+    #zkt-time-popup .zkt-mini-timer {
+      display: none;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: #fff;
+      margin-left: 6px;
+    }
+    #zkt-time-popup.zkt-minimized .zkt-mini-timer {
+      display: inline;
+    }
+  `;
+  document.head.appendChild(styles);
+}
+
+// ============================================================================
+// FLOATING TIME TRACKING POPUP
+// ============================================================================
+
+let timePopupInterval = null;
+let timePopupDragState = null;
+
+function formatElapsedTime(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const pad = (n) => n.toString().padStart(2, '0');
+
+  if (hours > 0) {
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function showTimePopup(ticketId, subject, startTime, accumulatedTime) {
+  injectStyles();
+
+  // Remove existing popup
+  hideTimePopup();
+
+  const popup = document.createElement('div');
+  popup.id = 'zkt-time-popup';
+  popup.innerHTML = `
+    <div class="zkt-popup-card">
+      <div class="zkt-popup-header">
+        <div class="zkt-popup-header-left">
+          <div class="zkt-pulse-dot"></div>
+          <span>Tracking</span>
+          <span class="zkt-mini-timer" id="zkt-mini-timer">00:00</span>
+        </div>
+        <div style="display:flex;gap:2px;">
+          <button class="zkt-popup-minimize" id="zkt-popup-minimize" title="Minimize">−</button>
+          <button class="zkt-popup-close" id="zkt-popup-close" title="Hide popup">×</button>
+        </div>
+      </div>
+      <div class="zkt-popup-body">
+        <div class="zkt-ticket-id">#${ticketId}</div>
+        <div class="zkt-ticket-subject" title="${subject}">${subject}</div>
+        <div class="zkt-timer-display" id="zkt-timer-display">00:00</div>
+        <div class="zkt-timer-label">time on ticket</div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(popup);
+
+  // Close button
+  document.getElementById('zkt-popup-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    popup.style.animation = 'none';
+    popup.style.opacity = '0';
+    popup.style.transform = 'translateY(20px)';
+    popup.style.transition = 'opacity 0.2s, transform 0.2s';
+    setTimeout(() => popup.remove(), 200);
+  });
+
+  // Minimize button
+  document.getElementById('zkt-popup-minimize').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isMinimized = popup.classList.toggle('zkt-minimized');
+    e.target.textContent = isMinimized ? '+' : '−';
+    e.target.title = isMinimized ? 'Expand' : 'Minimize';
+  });
+
+  // Dragging
+  const card = popup.querySelector('.zkt-popup-card');
+  const header = popup.querySelector('.zkt-popup-header');
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'BUTTON') return;
+    e.preventDefault();
+    const rect = popup.getBoundingClientRect();
+    timePopupDragState = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+    };
+    popup.style.transition = 'none';
+  });
+
+  document.addEventListener('mousemove', handlePopupDrag);
+  document.addEventListener('mouseup', handlePopupDragEnd);
+
+  // Update timer immediately and every second
+  updateTimePopup(startTime, accumulatedTime);
+  timePopupInterval = setInterval(() => {
+    updateTimePopup(startTime, accumulatedTime);
+  }, 1000);
+}
+
+function handlePopupDrag(e) {
+  if (!timePopupDragState) return;
+  const popup = document.getElementById('zkt-time-popup');
+  if (!popup) return;
+
+  const dx = e.clientX - timePopupDragState.startX;
+  const dy = e.clientY - timePopupDragState.startY;
+
+  popup.style.right = 'auto';
+  popup.style.bottom = 'auto';
+  popup.style.left = (timePopupDragState.startLeft + dx) + 'px';
+  popup.style.top = (timePopupDragState.startTop + dy) + 'px';
+}
+
+function handlePopupDragEnd() {
+  timePopupDragState = null;
+}
+
+function updateTimePopup(startTime, accumulatedTime) {
+  const timerEl = document.getElementById('zkt-timer-display');
+  const miniTimerEl = document.getElementById('zkt-mini-timer');
+  if (!timerEl) return;
+
+  const sessionTime = Date.now() - startTime;
+  const totalTime = accumulatedTime + sessionTime;
+  const formatted = formatElapsedTime(totalTime);
+
+  timerEl.textContent = formatted;
+  if (miniTimerEl) miniTimerEl.textContent = formatted;
+}
+
+function hideTimePopup() {
+  if (timePopupInterval) {
+    clearInterval(timePopupInterval);
+    timePopupInterval = null;
+  }
+  document.getElementById('zkt-time-popup')?.remove();
+  document.removeEventListener('mousemove', handlePopupDrag);
+  document.removeEventListener('mouseup', handlePopupDragEnd);
+  timePopupDragState = null;
 }
 
 // ============================================================================
@@ -1122,6 +1404,9 @@ async function startTicketTimer(ticketId) {
 
   await chrome.storage.local.set({ activeTicket });
 
+  // Show floating time popup on the page
+  showTimePopup(ticketId, subject, state.ticketStartTime, accumulatedTime);
+
   // Notify background script to start reminder alarms (accounting for accumulated time)
   chrome.runtime.sendMessage({
     type: 'TICKET_OPENED',
@@ -1169,6 +1454,9 @@ async function endTicketTimer() {
       ticketHistory: history.slice(-500)
     });
   }
+
+  // Hide floating time popup
+  hideTimePopup();
 
   // Clear active ticket (global state)
   await chrome.storage.local.set({ activeTicket: null });
@@ -1230,6 +1518,7 @@ function setupUrlChangeDetection() {
       const isEnabled = changes.trackingEnabled.newValue !== false;
       if (!isEnabled && state.currentTicketId) {
         log('Tracking disabled - stopping ticket timer');
+        hideTimePopup();
         endTicketTimer();
       } else if (isEnabled) {
         // Tracking re-enabled - check if we should start tracking current ticket
@@ -1249,7 +1538,7 @@ function setupUrlChangeDetection() {
 // INITIALIZATION
 // ============================================================================
 
-function init() {
+async function init() {
   log('Initializing on:', window.location.href);
 
   // Add click listener (capture phase to catch all clicks)
@@ -1260,6 +1549,24 @@ function init() {
 
   // Setup ticket time tracking
   setupUrlChangeDetection();
+
+  // Restore floating time popup if a ticket was already being tracked
+  try {
+    const { activeTicket } = await chrome.storage.local.get(['activeTicket']);
+    if (activeTicket && activeTicket.ticketId) {
+      const currentTicketId = getCurrentTicketId();
+      if (currentTicketId === activeTicket.ticketId) {
+        showTimePopup(
+          activeTicket.ticketId,
+          activeTicket.subject || 'Unknown Ticket',
+          activeTicket.startTime,
+          activeTicket.accumulatedTime || 0
+        );
+      }
+    }
+  } catch (e) {
+    log('Could not restore time popup:', e);
+  }
 
   log('Initialized successfully');
   log('Debug helpers available: Type ZKT.inspect() in console to identify elements');
