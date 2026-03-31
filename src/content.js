@@ -468,12 +468,12 @@ function injectStyles() {
       to { transform: translateX(0); opacity: 1; }
     }
     @keyframes zkt-popup-in {
-      from { transform: translateY(20px) scale(0.95); opacity: 0; }
+      from { transform: translateY(-20px) scale(0.95); opacity: 0; }
       to { transform: translateY(0) scale(1); opacity: 1; }
     }
     #zkt-time-popup {
       position: fixed;
-      bottom: 20px;
+      top: 80px;
       right: 20px;
       z-index: 999998;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -662,7 +662,7 @@ function showTimePopup(ticketId, subject, startTime, accumulatedTime) {
     e.stopPropagation();
     popup.style.animation = 'none';
     popup.style.opacity = '0';
-    popup.style.transform = 'translateY(20px)';
+    popup.style.transform = 'translateY(-20px)';
     popup.style.transition = 'opacity 0.2s, transform 0.2s';
     setTimeout(() => popup.remove(), 200);
   });
