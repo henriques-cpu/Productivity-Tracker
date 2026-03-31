@@ -921,6 +921,17 @@ async function linkActiveZendeskSubdomainToCompany(companyId) {
       return;
     }
 
+    // Clear this subdomain from any other company to prevent duplicate mappings.
+    // Without this, switching companies on the same Zendesk tab leaves the old
+    // company still mapped to this subdomain, causing routing to the wrong company.
+    const companies = await StorageUtils.getAllCompanies();
+    for (const [id, company] of Object.entries(companies)) {
+      if (id !== companyId && (company?.zendeskSubdomain || '').toLowerCase() === subdomain) {
+        await StorageUtils.updateCompany(id, { zendeskSubdomain: '' });
+        console.log(`[ZKT] Cleared subdomain "${subdomain}" from company ${id}`);
+      }
+    }
+
     await StorageUtils.updateCompany(companyId, { zendeskSubdomain: subdomain });
     console.log(`[ZKT] Linked company ${companyId} to Zendesk subdomain: ${subdomain}`);
   } catch (error) {
