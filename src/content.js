@@ -642,7 +642,7 @@ function showTimePopup(ticketId, subject, startTime, accumulatedTime) {
           <span class="zkt-mini-timer" id="zkt-mini-timer">00:00</span>
         </div>
         <div style="display:flex;gap:2px;">
-          <button class="zkt-popup-minimize" id="zkt-popup-minimize" title="Minimize">−</button>
+          <button class="zkt-popup-minimize" id="zkt-popup-minimize" title="Expand">+</button>
           <button class="zkt-popup-close" id="zkt-popup-close" title="Hide popup">×</button>
         </div>
       </div>
@@ -657,6 +657,9 @@ function showTimePopup(ticketId, subject, startTime, accumulatedTime) {
 
   document.body.appendChild(popup);
 
+  // Start collapsed
+  popup.classList.add('zkt-minimized');
+
   // Close button
   document.getElementById('zkt-popup-close').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -667,7 +670,7 @@ function showTimePopup(ticketId, subject, startTime, accumulatedTime) {
     setTimeout(() => popup.remove(), 200);
   });
 
-  // Minimize button
+  // Minimize/expand button
   document.getElementById('zkt-popup-minimize').addEventListener('click', (e) => {
     e.stopPropagation();
     const isMinimized = popup.classList.toggle('zkt-minimized');
