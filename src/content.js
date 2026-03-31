@@ -311,7 +311,8 @@ function isPublicReplyMode() {
     }
   }
 
-  // Check if it matches any public reply indicator
+  // Check if it's a known internal note mode (already handled above)
+  // Otherwise, check if it matches any public reply indicator
   const isPublic = SELECTORS.PUBLIC_REPLY_INDICATORS.some(
     indicator => ariaLabelLower.includes(indicator.toLowerCase())
   );
@@ -321,9 +322,11 @@ function isPublicReplyMode() {
     return { isPublic: true, channel };
   }
 
-  // Default: if we can't determine, don't track (safer)
-  log('Could not determine reply mode, not tracking');
-  return { isPublic: false };
+  // If channel switcher exists but aria-label doesn't match known indicators,
+  // treat as public if it's not explicitly internal (already checked above).
+  // This handles localized/translated Zendesk UIs and UI version differences.
+  log(`Channel switcher label not recognized ("${ariaLabel}"), assuming public reply`);
+  return { isPublic: true, channel };
 }
 
 // ============================================================================
@@ -1251,15 +1254,13 @@ window.addEventListener('message', (event) => {
     const replyDetected = analyzeApiResponse(url, response, requestBody);
     if (replyDetected) {
       const eventId = extractReplyEventId(url, response);
-      // Get channel information from the UI
+      // API response already confirmed this is a public reply - trust it.
+      // Only use the UI to detect the channel type (email, sms, chat).
       const replyMode = isPublicReplyMode();
-      if (replyMode.isPublic) {
-        log('✓ Public reply confirmed via response - tracking');
-        log('Channel detection result:', replyMode);
-        trackReplyWithDedup(replyMode.channel, eventId);
-      } else {
-        log('Response indicated reply, but UI is internal note - not tracking');
-      }
+      const channel = replyMode.channel || null;
+      log('✓ Public reply confirmed via API response - tracking');
+      log('Channel detection result:', { channel, uiPublic: replyMode.isPublic });
+      trackReplyWithDedup(channel, eventId);
     }
   }
 
