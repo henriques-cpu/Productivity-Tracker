@@ -25,7 +25,8 @@
     const promise = originalFetch.apply(this, args);
 
     // Intercept response for ticket/comment operations
-    if (method === 'POST' && (
+    // PUT is used by Zendesk to update tickets (including adding comments/replies)
+    if ((method === 'POST' || method === 'PUT') && (
       url.includes('/api/graphql') ||
       url.includes('/api/v2/tickets') ||
       url.includes('/api/lotus/tickets') ||
@@ -96,7 +97,8 @@
     console.log('[ZKT Injected] XHR intercepted:', url, method);
 
     // Listen for response
-    if (method === 'POST' && (
+    // PUT is used by Zendesk to update tickets (including adding comments/replies)
+    if ((method === 'POST' || method === 'PUT') && (
       url.includes('/api/v2/tickets') ||
       url.includes('/api/lotus/tickets') ||
       url.includes('/api/v2/any_channel/tickets') ||

@@ -1167,17 +1167,18 @@ function analyzeBFFConvoLogResponse(response) {
     return false;
   }
 
-  // Check if this is a public message from an agent
+  // Check if this is a public message from a staff member (agent, admin, etc.)
   const isPublicMessage = event.__typename === 'PublicMessage';
   const isInternalNote = event.__typename === 'InternalNote';
-  const isAgentMessage = event.actor?.role === 'AGENT';
+  const staffRoles = ['AGENT', 'ADMIN'];
+  const isStaffMessage = staffRoles.includes(event.actor?.role);
 
   // Only track if:
   // 1. It's a PublicMessage (not InternalNote)
-  // 2. It's from an Agent (not a Customer)
+  // 2. It's from staff (not a Customer)
   // 3. Event is recent (checked above)
-  if (isPublicMessage && isAgentMessage) {
-    log('✓ BFFConvoLogQuery: Public message from agent detected');
+  if (isPublicMessage && isStaffMessage) {
+    log('✓ BFFConvoLogQuery: Public message from staff detected');
     return true;
   }
 
@@ -1186,7 +1187,7 @@ function analyzeBFFConvoLogResponse(response) {
     return false;
   }
 
-  log('BFFConvoLogQuery: Not a trackable message');
+  log('BFFConvoLogQuery: Not a trackable message (role:', event.actor?.role, ', type:', event.__typename, ')');
   return false;
 }
 
