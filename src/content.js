@@ -59,6 +59,12 @@ const state = {
   recentReplyEventIds: new Map(),
   lastReplyTrackedAt: 0,
   lastResolvedChannel: null,
+  // What ZKT.diagnose() reports. Bounded so a long shift cannot grow it.
+  diagnostics: {
+    operations: [],
+    eventTypes: new Map(),
+    sessionEndCandidates: [],
+  },
   // Ticket time tracking
   currentTicketId: null,
   ticketStartTime: null,
@@ -803,6 +809,44 @@ window.ZKT = {
     console.log('[ZKT] Counts as a chat:', Metrics.isChatChannel(channel));
     return channel;
   },
+
+  /**
+   * Print everything the extension has seen on this tab's Zendesk API traffic.
+   *
+   * Run this right after finishing a chat to see which GraphQL operations
+   * fired and which conversation event types came back - that is what pins
+   * down the event behind "Messaging session ended by agent" on an account
+   * whose payloads we have not seen.
+   */
+  diagnose: () => {
+    const { operations, eventTypes, sessionEndCandidates } = state.diagnostics;
+
+    console.group('[ZKT] Diagnostics');
+    console.log('Resolved channel:', state.lastResolvedChannel || '(none seen yet)');
+    console.log('Counts as a chat:', Metrics.isChatChannel(state.lastResolvedChannel));
+
+    console.log('\nGraphQL/REST operations seen (newest last):');
+    console.table(operations);
+
+    console.log('\nConversation event types seen:');
+    console.table([...eventTypes.entries()].map(([typename, seen]) => ({
+      typename,
+      count: seen.count,
+      newestAgeSeconds: seen.newestAgeSeconds,
+      matchedAsSessionEnd: looksLikeSessionEnd(typename),
+    })));
+
+    if (sessionEndCandidates.length > 0) {
+      console.log('\nEvents that matched the session-end shape:', sessionEndCandidates);
+    } else {
+      console.log('\nNo session-end events matched yet.');
+    }
+
+    console.log('\nPaste this whole group when reporting that chats are not counted.');
+    console.groupEnd();
+
+    return { operations, eventTypes: [...eventTypes.keys()], sessionEndCandidates };
+  },
 };
 
 // ============================================================================
@@ -942,7 +986,23 @@ function resolveConversationChannel(payload) {
     if (channel) return channel;
   }
 
-  return findChannelDeep([payload], 0);
+  return channelFromConversationEvents(payload) || findChannelDeep([payload], 0);
+}
+
+/**
+ * Infer the channel from the conversation log's event types.
+ *
+ * BFFConvoLogQuery responses carry no `via.channel`, but Sunshine
+ * Conversations is the backend behind Zendesk messaging, so an event like
+ * `SunshineConversationsMessageStatus` only ever shows up on a messaging
+ * ticket. That makes the event types themselves a reliable channel marker.
+ */
+function channelFromConversationEvents(payload) {
+  const isMessaging = getConversationEvents(payload).some(
+    (event) => /^SunshineConversations/.test(event.typename) || /Messaging/i.test(event.typename)
+  );
+
+  return isMessaging ? 'native_messaging' : null;
 }
 
 /**
@@ -1066,71 +1126,174 @@ function analyzeGraphQLResponse(response, requestBody) {
   return isPublicReplyMode();
 }
 
+// Only events this recent are acted on, so opening a ticket never re-counts
+// its history. The conversation log is refetched within a second or two of a
+// send, so this window is generous.
+const EVENT_RECENCY_SECONDS = 10;
+
+const STAFF_ROLES = ['AGENT', 'ADMIN'];
+
+/**
+ * Pull the conversation events out of a BFFConvoLogQuery response.
+ *
+ * The edges are NOT reliably newest-first - on a messaging ticket the log
+ * comes back oldest-first, and a send is often followed by delivery-status
+ * events. So every edge is examined and each one's own age is what decides
+ * whether it is acted on, rather than trusting a position in the array.
+ */
+function getConversationEvents(response) {
+  const edges = response?.data?.ticket?.conversationEvents?.edges;
+  if (!Array.isArray(edges)) return [];
+
+  const now = Date.now();
+
+  return edges
+    .map((edge) => edge?.node)
+    .filter(Boolean)
+    .map((node) => {
+      const timestamp = new Date(node.timestamp).getTime();
+      return {
+        node,
+        typename: node.__typename || '',
+        ageSeconds: Number.isFinite(timestamp) ? (now - timestamp) / 1000 : Infinity,
+      };
+    });
+}
+
+function isRecent(event) {
+  return event.ageSeconds <= EVENT_RECENCY_SECONDS;
+}
+
 /**
  * Analyze BFFConvoLogQuery response (Zendesk Agent Workspace conversation log)
  * This query returns conversation events, including newly added messages
  */
 function analyzeBFFConvoLogResponse(response) {
-  const ticket = response?.data?.ticket;
-  if (!ticket) {
+  const events = getConversationEvents(response);
+
+  if (events.length === 0) {
     return false;
   }
 
-  const conversationEvents = ticket.conversationEvents;
-  if (!conversationEvents || !conversationEvents.edges || conversationEvents.edges.length === 0) {
+  debugLog('BFFConvoLogQuery: events', events.map((e) => ({
+    typename: e.typename,
+    actorRole: e.node.actor?.role,
+    ageSeconds: e.ageSeconds === Infinity ? 'no timestamp' : e.ageSeconds.toFixed(1),
+  })));
+
+  const recent = events.filter(isRecent);
+
+  if (recent.length === 0) {
+    log('BFFConvoLogQuery: no events within the last '
+      + `${EVENT_RECENCY_SECONDS}s, not tracking`);
     return false;
   }
 
-  // Get the most recent event (first in the array, since they're sorted by timestamp descending)
-  const mostRecentEdge = conversationEvents.edges[0];
-  const event = mostRecentEdge?.node;
+  // A public message from staff is the reply. Anything else in the batch
+  // (delivery receipts, customer messages, system events) is ignored rather
+  // than treated as a reason to give up.
+  const staffReply = recent.find((event) =>
+    event.typename === 'PublicMessage' && STAFF_ROLES.includes(event.node.actor?.role)
+  );
 
-  if (!event) {
-    return false;
-  }
-
-  // Check timestamp - only track if message is very recent (within last 10 seconds)
-  // This prevents tracking old messages when refreshing or navigating
-  const eventTimestamp = new Date(event.timestamp).getTime();
-  const now = Date.now();
-  const ageInSeconds = (now - eventTimestamp) / 1000;
-
-  debugLog('BFFConvoLogQuery: Checking most recent event:', {
-    id: event.id,
-    typename: event.__typename,
-    actor: event.actor?.name,
-    actorRole: event.actor?.role,
-    ageInSeconds: ageInSeconds.toFixed(1)
-  });
-
-  // Only process very recent events (within 10 seconds)
-  if (ageInSeconds > 10) {
-    log('BFFConvoLogQuery: Event too old, not tracking');
-    return false;
-  }
-
-  // Check if this is a public message from a staff member (agent, admin, etc.)
-  const isPublicMessage = event.__typename === 'PublicMessage';
-  const isInternalNote = event.__typename === 'InternalNote';
-  const staffRoles = ['AGENT', 'ADMIN'];
-  const isStaffMessage = staffRoles.includes(event.actor?.role);
-
-  // Only track if:
-  // 1. It's a PublicMessage (not InternalNote)
-  // 2. It's from staff (not a Customer)
-  // 3. Event is recent (checked above)
-  if (isPublicMessage && isStaffMessage) {
+  if (staffReply) {
     log('✓ BFFConvoLogQuery: Public message from staff detected');
     return true;
   }
 
-  if (isInternalNote) {
-    log('✗ BFFConvoLogQuery: Internal note detected');
-    return false;
+  log('BFFConvoLogQuery: no staff public message among recent events:',
+    recent.map((e) => e.typename).join(', '));
+  return false;
+}
+
+/**
+ * Did a messaging session just end?
+ *
+ * Ending a session is an explicit agent action (the End Session button in the
+ * composer) that means "this conversation is done" - the composer's messaging
+ * channel is switched off and the customer can no longer reply over it. That
+ * makes it the clearest per-conversation signal Zendesk gives us, and unlike a
+ * reply it fires exactly once.
+ *
+ * Zendesk does not document the conversation event's `__typename`, so both an
+ * exact match against the names we expect and a shape match on the name are
+ * accepted. The only cost of a false positive is one extra chat on a ticket
+ * that already had a messaging session, since counting is deduped per ticket
+ * per day; `ZKT.diagnose()` prints every typename seen so the exact one can be
+ * pinned down from a real conversation.
+ */
+const SESSION_END_TYPENAMES = [
+  'MessagingSessionEnded',
+  'MessagingSessionEnd',
+  'SessionEnded',
+  'ConversationSessionEnded',
+  'SunshineConversationsSessionEnded',
+];
+
+function looksLikeSessionEnd(typename) {
+  if (!typename) return false;
+  if (SESSION_END_TYPENAMES.includes(typename)) return true;
+  return /session/i.test(typename) && /end/i.test(typename);
+}
+
+// ============================================================================
+// DIAGNOSTICS (what ZKT.diagnose() reports)
+// ============================================================================
+
+const MAX_DIAGNOSTIC_OPERATIONS = 40;
+
+/**
+ * Remember the shape of each intercepted response, so an account whose
+ * payloads differ from the ones we know can be diagnosed from the console
+ * without turning DEBUG_MODE on and re-running the whole conversation.
+ * Only names, roles and ages are kept - never message contents.
+ */
+function recordDiagnostics(url, response, requestBody) {
+  const { diagnostics } = state;
+
+  let operationName = '';
+  try {
+    operationName = JSON.parse(requestBody)?.operationName || '';
+  } catch (e) {
+    // Not JSON, or not a GraphQL call - the URL alone identifies it.
   }
 
-  log('BFFConvoLogQuery: Not a trackable message (role:', event.actor?.role, ', type:', event.__typename, ')');
-  return false;
+  diagnostics.operations.push({
+    at: new Date().toLocaleTimeString(),
+    operation: operationName || url.split('?')[0].split('/').slice(-3).join('/'),
+  });
+
+  if (diagnostics.operations.length > MAX_DIAGNOSTIC_OPERATIONS) {
+    diagnostics.operations.shift();
+  }
+
+  for (const event of getConversationEvents(response)) {
+    const seen = diagnostics.eventTypes.get(event.typename) || { count: 0 };
+    seen.count++;
+    seen.newestAgeSeconds = event.ageSeconds === Infinity
+      ? 'no timestamp'
+      : Math.min(Number(seen.newestAgeSeconds) || Infinity, event.ageSeconds).toFixed(1);
+    diagnostics.eventTypes.set(event.typename, seen);
+
+    if (looksLikeSessionEnd(event.typename)) {
+      diagnostics.sessionEndCandidates.push({
+        typename: event.typename,
+        actorRole: event.node.actor?.role,
+        ageSeconds: event.ageSeconds,
+      });
+    }
+  }
+}
+
+function detectEndedMessagingSession(response) {
+  const ended = getConversationEvents(response).find(
+    (event) => isRecent(event) && looksLikeSessionEnd(event.typename)
+  );
+
+  if (!ended) return false;
+
+  log(`✓ Messaging session ended (${ended.typename})`);
+  return true;
 }
 
 /**
@@ -1194,6 +1357,21 @@ window.addEventListener('message', (event) => {
     const { url, response, requestBody } = event.data.data;
     debugLog('API Response intercepted:', { url, response });
 
+    recordDiagnostics(url, response, requestBody);
+
+    const ticketId = getCurrentTicketId();
+    const channel = resolveConversationChannel(response);
+    if (channel) {
+      state.lastResolvedChannel = channel;
+    }
+
+    // An ended messaging session is a whole conversation finishing, so it
+    // counts a chat on its own - no reply needed. Only messaging tickets have
+    // sessions to end, which is why the channel can be assumed here.
+    if (detectEndedMessagingSession(response)) {
+      trackChatConversation(ticketId, channel || 'native_messaging');
+    }
+
     // Analyze response to detect public reply submissions
     if (!analyzeApiResponse(url, response, requestBody)) return;
 
@@ -1202,12 +1380,11 @@ window.addEventListener('message', (event) => {
     const eventId = extractReplyEventId(url, response);
     if (!trackReplyWithDedup(eventId)) return;
 
-    // The same confirmed reply tells us whether this conversation is a chat.
-    const channel = resolveConversationChannel(response);
-    state.lastResolvedChannel = channel;
+    // Replying on a messaging ticket also counts the conversation, for agents
+    // who never press End Session. The per-ticket-per-day dedup in
+    // trackChatConversation keeps the two signals from double-counting.
     log('Conversation channel:', channel || 'unknown');
-
-    trackChatConversation(getCurrentTicketId(), channel);
+    trackChatConversation(ticketId, channel);
   }
 });
 

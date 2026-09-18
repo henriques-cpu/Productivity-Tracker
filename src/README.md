@@ -33,27 +33,49 @@ A Chrome extension for tracking Customer Support metrics in real-time with a Pow
 | Metric | What it counts | How it is detected |
 | --- | --- | --- |
 | **Replies** | Every public reply you send, on any channel | Zendesk's own ticket API response confirms the comment was public and from staff |
-| **Chats** | Each chat/messaging conversation you take part in, counted once per ticket per day | The same confirmed reply, when the ticket's Zendesk channel is a chat channel |
+| **Chats** | Each chat/messaging conversation you handle, counted once per ticket per day | The messaging session ending, or a public reply on a messaging ticket |
 | **Calls** | Each call you finish, inbound or outbound | Clicking the Talk hang-up control |
 
 #### What counts as a chat
 
-Zendesk Agent Workspace has no "end chat" button to hook - a messaging
-conversation is an ordinary ticket - so a chat is counted from the ticket's
-originating channel instead. When a public reply is confirmed, the extension
-reads the ticket's `via.channel` out of the intercepted API payload; if it is
-`native_messaging` (Agent Workspace messaging, including the web widget, social
-and in-app conversations), `chat` (legacy Zendesk Chat) or `messaging`, the
-conversation is counted as one chat.
+A messaging conversation in Agent Workspace is an ordinary ticket, so a chat is
+counted from two signals, whichever comes first:
 
-Counting is per ticket per day, so replying to the same conversation several
-times adds replies, not chats. The recognised channel values live in
-`CHAT_CHANNELS` in `metrics.js`.
+1. **The messaging session ends.** Ending a session is an explicit agent action
+   (the **End Session** button in the composer) that switches the messaging
+   channel off for that conversation and stops the customer replying over it.
+   It is the event shown in the ticket as *"Messaging session ended by agent"*,
+   and it means one conversation finished.
+2. **A public reply on a messaging ticket.** A fallback for agents who never
+   press End Session, so chats are still counted.
 
-If chats are not being counted, open a chat ticket, send a reply, and run
-`ZKT.channel()` in the browser console: it prints the channel the extension
-resolved and whether that channel counts as a chat. Add the value to
-`CHAT_CHANNELS` if your account uses a channel that isn't listed.
+Either way the counting is per ticket per day, so replying several times - or
+replying and then ending the session - is still one chat.
+
+A ticket counts as messaging when the intercepted payload says so, in this
+order: an explicit `via.channel` of `native_messaging` (Agent Workspace
+messaging, including the web widget, social and in-app conversations), `chat`
+(legacy Zendesk Chat) or `messaging`; otherwise the conversation log's own
+event types, since Sunshine Conversations events such as
+`SunshineConversationsMessageStatus` only appear on messaging tickets. The
+recognised channel values live in `CHAT_CHANNELS` in `metrics.js`.
+
+#### If chats still are not counted
+
+Zendesk does not document the conversation event behind "Messaging session
+ended by agent", so the extension matches both the names it expects and
+anything shaped like a session ending. To check what your account actually
+sends, finish a chat and run this in the browser console:
+
+```javascript
+ZKT.diagnose()
+```
+
+It prints every GraphQL operation seen, every conversation event type with how
+recently it appeared, and whether any of them matched the session-end shape -
+without logging message contents. `ZKT.channel()` prints just the channel that
+was resolved last. Add a missing event type to `SESSION_END_TYPENAMES` in
+`content.js`, or a missing channel to `CHAT_CHANNELS` in `metrics.js`.
 
 ### Manual Tracking
 
@@ -148,9 +170,10 @@ scorecards, charts, comparison table, context menu and CSV columns, and its
 - Check if the content script is loaded (open DevTools > Console)
 
 ### Replies or chats not counted
-- Set `DEBUG_MODE = true` at the top of `content.js` to log every intercepted
-  API response, then reload the Zendesk tab
-- Run `ZKT.channel()` to see the channel the extension resolved for the ticket
+- Run `ZKT.diagnose()` after finishing a conversation (see "If chats still are
+  not counted" above) - it usually identifies the problem on its own
+- Set `DEBUG_MODE = true` at the top of `content.js` for the full payloads,
+  then reload the Zendesk tab
 - Use the manual tracking buttons as a fallback
 
 ### Calls not counted
