@@ -4,7 +4,7 @@ A Chrome extension for tracking Customer Support metrics in real-time with a Pow
 
 ## Features
 
-- **Automatic Tracking**: Detects replies, chats, and calls directly from the Zendesk interface
+- **Automatic Tracking**: Detects replies and chats from Zendesk's own API traffic, and calls from the Talk hang-up control
 - **Manual Tracking**: Fallback buttons for when automatic detection doesn't work
 - **Power BI-style Dashboard**: Beautiful dark-themed popup with scorecards and charts
 - **Per-Company Zendesk Routing**: Auto-routes tracking data to the mapped company based on Zendesk subdomain
@@ -28,26 +28,43 @@ A Chrome extension for tracking Customer Support metrics in real-time with a Pow
 
 ## Usage
 
-### Automatic Tracking
+### Tracked Metrics
 
-The extension automatically tracks metrics when you:
-- **Replies**: Click Submit/Send on ticket replies
-- **Chats**: Click "End Chat" or when a chat ends
-- **Inbound Calls**: When an incoming call ends
-- **Outbound Calls**: When you complete a dialed call
+| Metric | What it counts | How it is detected |
+| --- | --- | --- |
+| **Replies** | Every public reply you send, on any channel | Zendesk's own ticket API response confirms the comment was public and from staff |
+| **Chats** | Each chat/messaging conversation you take part in, counted once per ticket per day | The same confirmed reply, when the ticket's Zendesk channel is a chat channel |
+| **Calls** | Each call you finish, inbound or outbound | Clicking the Talk hang-up control |
+
+#### What counts as a chat
+
+Zendesk Agent Workspace has no "end chat" button to hook - a messaging
+conversation is an ordinary ticket - so a chat is counted from the ticket's
+originating channel instead. When a public reply is confirmed, the extension
+reads the ticket's `via.channel` out of the intercepted API payload; if it is
+`native_messaging` (Agent Workspace messaging, including the web widget, social
+and in-app conversations), `chat` (legacy Zendesk Chat) or `messaging`, the
+conversation is counted as one chat.
+
+Counting is per ticket per day, so replying to the same conversation several
+times adds replies, not chats. The recognised channel values live in
+`CHAT_CHANNELS` in `metrics.js`.
+
+If chats are not being counted, open a chat ticket, send a reply, and run
+`ZKT.channel()` in the browser console: it prints the channel the extension
+resolved and whether that channel counts as a chat. Add the value to
+`CHAT_CHANNELS` if your account uses a channel that isn't listed.
 
 ### Manual Tracking
 
 If automatic tracking doesn't work for your Zendesk configuration:
 1. Click the extension icon to open the dashboard
-2. Use the +Reply, +Chat, +Inbound, +Outbound buttons
+2. Use the +Reply, +Chat, +Call buttons
 
 ### Right-Click Menu
 
-On any Zendesk page, right-click and select:
-- Zendesk KPI Tracker > Track Reply
-- Zendesk KPI Tracker > Track Chat
-- etc.
+On any Zendesk page, right-click and select **Track Metric**, then
+**+ Reply**, **+ Chat** or **+ Call**.
 
 ### Setting Goals
 
@@ -86,24 +103,29 @@ Since Zendesk uses dynamic CSS classes that may change, you may need to update t
 
 ```javascript
 const SELECTORS = {
-  REPLY_SUBMIT_BUTTONS: [
-    '[data-test-id="submit-button"]',  // Add your custom selector here
+  CALL_END_BUTTONS: [
+    '[data-test-id="end-call-button"]',  // Add your custom selector here
     // ... other selectors
   ],
   // ...
 };
 ```
 
+Replies and chats do not use selectors - they are read from Zendesk's API
+responses, which survive UI redesigns. Only call detection depends on the DOM.
+
 ## File Structure
 
 ```
 src/
 ├── manifest.json      # Extension configuration
-├── content.js         # DOM scraping & event detection
-├── background.js      # Data persistence & messaging
-├── popup.html         # Dashboard UI
-├── popup.js           # Dashboard logic & charts
-├── popup.css          # Power BI-style styling
+├── metrics.js         # Shared metric schema, defaults & migrations
+├── inject.js          # fetch/XHR interception (page context)
+├── content.js         # Event detection & ticket time tracking
+├── background.js      # Ticket reminders, context menu & badge
+├── storage-utils.js   # Multi-company storage helpers
+├── popup.html/js/css  # Toolbar popup
+├── dashboard.html/js/css # Full analytics dashboard
 └── icons/
     ├── icon.svg       # Source icon
     ├── icon16.png     # 16x16 icon
@@ -112,6 +134,12 @@ src/
     └── icon128.png    # 128x128 icon
 ```
 
+### Adding or changing a metric
+
+`metrics.js` is the single source of truth. Its `METRICS` array drives the
+scorecards, charts, comparison table, context menu and CSV columns, and its
+`normalizeMetrics`/`normalizeGoals` helpers migrate previously stored data.
+
 ## Troubleshooting
 
 ### Extension shows "Not tracking"
@@ -119,10 +147,15 @@ src/
 - Try refreshing the page
 - Check if the content script is loaded (open DevTools > Console)
 
-### Automatic tracking not working
-- Zendesk may have updated their UI
-- Use manual tracking buttons as a fallback
-- Update selectors in content.js (see "Updating Selectors" above)
+### Replies or chats not counted
+- Set `DEBUG_MODE = true` at the top of `content.js` to log every intercepted
+  API response, then reload the Zendesk tab
+- Run `ZKT.channel()` to see the channel the extension resolved for the ticket
+- Use the manual tracking buttons as a fallback
+
+### Calls not counted
+- Zendesk may have changed the Talk hang-up control
+- Update `CALL_END_BUTTONS` in content.js (see "Updating Selectors" above)
 
 ### Data not persisting
 - Check Chrome storage quota: `chrome://settings/siteData`

@@ -95,7 +95,7 @@
             <!-- Today's Performance -->
             <section class="dashboard-section">
                 <h2 class="section-title">Today's Performance</h2>
-                <div class="cards-grid-4">
+                <div class="cards-grid-3">
                     <div class="metric-card card-blue">
                         <div class="card-header">
                             <span class="card-label">Replies</span>
@@ -121,31 +121,30 @@
                             </svg>
                         </div>
                         <div class="card-value" id="todayChat">0</div>
+                        <div class="card-footer">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressChat" style="width: 0%"></div>
+                            </div>
+                            <span class="card-goal">Goal: <span id="goalChat">15</span></span>
+                        </div>
                         <div class="card-change" id="changeChat">+0 from yesterday</div>
                     </div>
 
                     <div class="metric-card card-orange">
                         <div class="card-header">
-                            <span class="card-label">Inbound Calls</span>
+                            <span class="card-label">Calls</span>
                             <svg class="card-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                             </svg>
                         </div>
-                        <div class="card-value" id="todayInbound">0</div>
-                        <div class="card-change" id="changeInbound">+0 from yesterday</div>
-                    </div>
-
-                    <div class="metric-card card-purple">
-                        <div class="card-header">
-                            <span class="card-label">Outbound Calls</span>
-                            <svg class="card-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 7 23 1 17 1"></polyline>
-                                <line x1="16" y1="8" x2="23" y2="1"></line>
-                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                            </svg>
+                        <div class="card-value" id="todayCall">0</div>
+                        <div class="card-footer">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressCall" style="width: 0%"></div>
+                            </div>
+                            <span class="card-goal">Goal: <span id="goalCall">10</span></span>
                         </div>
-                        <div class="card-value" id="todayOutbound">0</div>
-                        <div class="card-change" id="changeOutbound">+0 from yesterday</div>
+                        <div class="card-change" id="changeCall">+0 from yesterday</div>
                     </div>
                 </div>
             </section>
@@ -173,61 +172,6 @@
                         <div class="stat-label">Goal Achievement</div>
                         <div class="stat-value" id="goalAchievement">0%</div>
                         <div class="stat-subtitle">Overall rate</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Total Replies Summary -->
-            <section class="dashboard-section">
-                <h2 class="section-title">Total Replies Summary</h2>
-                <div class="replies-summary-grid">
-                    <div class="replies-total-card">
-                        <div class="replies-total-icon">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                            </svg>
-                        </div>
-                        <div class="replies-total-info">
-                            <div class="replies-total-label">Total Replies Today</div>
-                            <div class="replies-total-value" id="totalRepliesToday">0</div>
-                        </div>
-                    </div>
-                    <div class="replies-breakdown">
-                        <div class="reply-channel-card">
-                            <div class="channel-icon email">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-                                    <path d="M22 6l-10 7L2 6"></path>
-                                </svg>
-                            </div>
-                            <div class="channel-info">
-                                <span class="channel-label">Email</span>
-                                <span class="channel-value" id="replyEmailCount">0</span>
-                            </div>
-                        </div>
-                        <div class="reply-channel-card">
-                            <div class="channel-icon sms">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-                                    <line x1="12" y1="18" x2="12.01" y2="18"></line>
-                                </svg>
-                            </div>
-                            <div class="channel-info">
-                                <span class="channel-label">SMS</span>
-                                <span class="channel-value" id="replySMSCount">0</span>
-                            </div>
-                        </div>
-                        <div class="reply-channel-card">
-                            <div class="channel-icon chat">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-                                </svg>
-                            </div>
-                            <div class="channel-info">
-                                <span class="channel-label">Chat</span>
-                                <span class="channel-value" id="replyChatCount">0</span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </section>
@@ -332,27 +276,20 @@
 
             <section class="dashboard-section">
                 <h2 class="section-title">Metric Comparison</h2>
-                <div class="section-row">
-                    <div class="section-col-6">
+                <div class="section-row section-row-3">
+                    <div class="section-col">
                         <div class="chart-container">
                             <canvas id="replyTrendChart"></canvas>
                         </div>
                     </div>
-                    <div class="section-col-6">
+                    <div class="section-col">
                         <div class="chart-container">
                             <canvas id="chatTrendChart"></canvas>
                         </div>
                     </div>
-                </div>
-                <div class="section-row">
-                    <div class="section-col-6">
+                    <div class="section-col">
                         <div class="chart-container">
-                            <canvas id="inboundTrendChart"></canvas>
-                        </div>
-                    </div>
-                    <div class="section-col-6">
-                        <div class="chart-container">
-                            <canvas id="outboundTrendChart"></canvas>
+                            <canvas id="callTrendChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -461,20 +398,12 @@
                                 <td id="cmpChangeChat">--</td>
                             </tr>
                             <tr>
-                                <td><span class="metric-badge badge-orange">Inbound</span></td>
-                                <td id="cmpTodayInbound">0</td>
-                                <td id="cmpYesterdayInbound">0</td>
-                                <td id="cmp7DayInbound">0</td>
-                                <td id="cmp30DayInbound">0</td>
-                                <td id="cmpChangeInbound">--</td>
-                            </tr>
-                            <tr>
-                                <td><span class="metric-badge badge-purple">Outbound</span></td>
-                                <td id="cmpTodayOutbound">0</td>
-                                <td id="cmpYesterdayOutbound">0</td>
-                                <td id="cmp7DayOutbound">0</td>
-                                <td id="cmp30DayOutbound">0</td>
-                                <td id="cmpChangeOutbound">--</td>
+                                <td><span class="metric-badge badge-orange">Calls</span></td>
+                                <td id="cmpTodayCall">0</td>
+                                <td id="cmpYesterdayCall">0</td>
+                                <td id="cmp7DayCall">0</td>
+                                <td id="cmp30DayCall">0</td>
+                                <td id="cmpChangeCall">--</td>
                             </tr>
                         </tbody>
                     </table>
@@ -544,10 +473,16 @@
                 <div class="settings-section">
                     <h3>Daily Goals</h3>
                     <div class="settings-group">
-                        <label for="goalReplyInput">
-                            <span class="goal-icon">📧</span> Replies Goal
-                        </label>
+                        <label for="goalReplyInput">Replies Goal</label>
                         <input type="number" id="goalReplyInput" min="0" max="100" value="20">
+                    </div>
+                    <div class="settings-group">
+                        <label for="goalChatInput">Chats Goal</label>
+                        <input type="number" id="goalChatInput" min="0" max="100" value="15">
+                    </div>
+                    <div class="settings-group">
+                        <label for="goalCallInput">Calls Goal</label>
+                        <input type="number" id="goalCallInput" min="0" max="100" value="10">
                     </div>
                 </div>
             </div>
@@ -559,6 +494,7 @@
     </div>
 
     <script src="chart.min.js"></script>
+    <script src="metrics.js"></script>
     <script src="storage-utils.js"></script>
     <script src="dashboard.js"></script>
 </body>
