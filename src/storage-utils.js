@@ -1,7 +1,8 @@
 /**
  * Storage Utilities for Multi-Company Support
  *
- * Handles data migration and provides helpers for company-scoped data access
+ * Handles data migration and provides helpers for company-scoped data access.
+ * Requires metrics.js to be loaded first.
  */
 
 // Company colors for visual differentiation
@@ -31,41 +32,24 @@ function getNextCompanyColor() {
  * Generate a unique company ID
  */
 function generateCompanyId() {
-  return 'company_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  return `company_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 /**
  * Create an empty company data structure
  */
 function createEmptyCompany(name, color) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = Metrics.getTodayDateString();
 
   return {
     name: name || 'New Company',
     color: color || getNextCompanyColor(),
     zendeskSubdomain: null,
-    metrics: {
-      date: today,
-      reply: 0,
-      replyEmail: 0,
-      replySMS: 0,
-      replyChat: 0,
-      chat: 0,
-      inbound: 0,
-      outbound: 0,
-      lastUpdated: Date.now()
-    },
+    metrics: Metrics.createEmptyMetrics(),
     history: [],
-    goals: {
-      reply: 20,
-      chat: 15,
-      inbound: 10,
-      outbound: 5
-    },
-    ticketTimeCache: {
-      date: today,
-      tickets: {}
-    },
+    goals: { ...Metrics.DEFAULT_GOALS },
+    chatTickets: { date: today, ticketIds: [] },
+    ticketTimeCache: { date: today, tickets: {} },
     ticketHistory: []
   };
 }
@@ -88,12 +72,11 @@ async function migrateToMultiCompany() {
       // Create default company from existing data
       const defaultCompanyId = generateCompanyId();
       const defaultCompany = {
-        name: 'Default Company',
-        color: COMPANY_COLORS[0],
-        metrics: result.metrics || createEmptyCompany().metrics,
-        history: result.history || [],
-        goals: result.goals || { reply: 20, chat: 15, inbound: 10, outbound: 5 },
-        ticketTimeCache: result.ticketTimeCache || { date: new Date().toISOString().split('T')[0], tickets: {} },
+        ...createEmptyCompany('Default Company', COMPANY_COLORS[0]),
+        metrics: Metrics.normalizeMetrics(result.metrics),
+        history: Metrics.normalizeHistory(result.history),
+        goals: Metrics.normalizeGoals(result.goals),
+        ticketTimeCache: result.ticketTimeCache || { date: Metrics.getTodayDateString(), tickets: {} },
         ticketHistory: result.ticketHistory || []
       };
 
@@ -113,6 +96,45 @@ async function migrateToMultiCompany() {
           console.log('[Storage Utils] Migration completed successfully');
           resolve({ migrated: true, defaultCompanyId });
         });
+      });
+    });
+  });
+}
+
+/**
+ * Rewrite every company's stored metrics, history and goals in the current
+ * schema, folding the old inbound/outbound counters into `call` and dropping
+ * the per-channel reply counters. Safe to run on every load: once the stored
+ * data already matches the schema, nothing is written.
+ */
+async function migrateMetricsSchema() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['companies'], (result) => {
+      const companies = result.companies || {};
+      let changed = false;
+
+      for (const [id, company] of Object.entries(companies)) {
+        const migrated = {
+          ...company,
+          metrics: Metrics.normalizeMetrics(company.metrics),
+          history: Metrics.normalizeHistory(company.history),
+          goals: Metrics.normalizeGoals(company.goals),
+        };
+
+        if (JSON.stringify(migrated) !== JSON.stringify(company)) {
+          companies[id] = migrated;
+          changed = true;
+        }
+      }
+
+      if (!changed) {
+        resolve(false);
+        return;
+      }
+
+      chrome.storage.local.set({ companies }, () => {
+        console.log('[Storage Utils] Migrated stored metrics to the current schema');
+        resolve(true);
       });
     });
   });
@@ -265,14 +287,6 @@ async function deleteCompany(companyId) {
 }
 
 /**
- * Get metrics for active company
- */
-async function getActiveMetrics() {
-  const company = await getActiveCompany();
-  return company ? company.data.metrics : null;
-}
-
-/**
  * Save metrics for active company
  */
 async function saveActiveMetrics(metrics) {
@@ -289,14 +303,6 @@ async function saveActiveMetrics(metrics) {
       }
     });
   });
-}
-
-/**
- * Get goals for active company
- */
-async function getActiveGoals() {
-  const company = await getActiveCompany();
-  return company ? company.data.goals : null;
 }
 
 /**
@@ -318,33 +324,6 @@ async function saveActiveGoals(goals) {
   });
 }
 
-/**
- * Get history for active company
- */
-async function getActiveHistory() {
-  const company = await getActiveCompany();
-  return company ? company.data.history : [];
-}
-
-/**
- * Save history for active company
- */
-async function saveActiveHistory(history) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
-      const companies = result.companies || {};
-      const activeId = result.activeCompanyId;
-
-      if (activeId && companies[activeId]) {
-        companies[activeId].history = history;
-        chrome.storage.local.set({ companies }, () => resolve(true));
-      } else {
-        resolve(false);
-      }
-    });
-  });
-}
-
 // Make functions available globally
 if (typeof window !== 'undefined') {
   window.StorageUtils = {
@@ -356,12 +335,9 @@ if (typeof window !== 'undefined') {
     createCompany,
     updateCompany,
     deleteCompany,
-    getActiveMetrics,
+    migrateMetricsSchema,
     saveActiveMetrics,
-    getActiveGoals,
     saveActiveGoals,
-    getActiveHistory,
-    saveActiveHistory,
     createEmptyCompany,
     generateCompanyId,
     getNextCompanyColor

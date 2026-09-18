@@ -1,21 +1,26 @@
 /**
  * Zendesk KPI Tracker - Background Service Worker
  *
- * Handles message routing, context menus, and badge updates.
+ * Handles ticket time reminders, context menus, and badge updates.
  * Note: Main data persistence is handled directly by popup.js and content.js
  * using chrome.storage.local for reliability.
  */
 
+importScripts('metrics.js');
+
+const {
+  METRICS,
+  DEFAULT_GOALS,
+  getTodayDateString,
+  createEmptyMetrics,
+  normalizeMetrics,
+  normalizeHistory,
+  metricsTotal,
+} = Metrics;
+
 // ============================================================================
 // CONSTANTS
 // ============================================================================
-
-const DEFAULT_GOALS = {
-  reply: 20,
-  chat: 15,
-  inbound: 10,
-  outbound: 5,
-};
 
 // Default ticket time reminder settings (in minutes)
 const DEFAULT_REMINDER_SETTINGS = {
@@ -25,6 +30,9 @@ const DEFAULT_REMINDER_SETTINGS = {
 
 // Alarm name prefix for ticket reminders
 const TICKET_ALARM_PREFIX = 'ticket-reminder-';
+
+// Context menu item ids are this prefix plus the metric key
+const CONTEXT_MENU_PREFIX = 'zkt-track-';
 
 // ============================================================================
 // STORAGE UTILITIES (for service worker context)
@@ -45,30 +53,14 @@ async function getActiveCompany() {
   });
 }
 
-async function updateActiveCompanyMetrics(metrics) {
+async function updateActiveCompany(updates) {
   return new Promise((resolve) => {
     chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
       const companies = result.companies || {};
       const activeId = result.activeCompanyId;
 
       if (activeId && companies[activeId]) {
-        companies[activeId].metrics = { ...metrics, lastUpdated: Date.now() };
-        chrome.storage.local.set({ companies }, () => resolve(true));
-      } else {
-        resolve(false);
-      }
-    });
-  });
-}
-
-async function updateActiveCompanyHistory(history) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['companies', 'activeCompanyId'], (result) => {
-      const companies = result.companies || {};
-      const activeId = result.activeCompanyId;
-
-      if (activeId && companies[activeId]) {
-        companies[activeId].history = history;
+        companies[activeId] = { ...companies[activeId], ...updates };
         chrome.storage.local.set({ companies }, () => resolve(true));
       } else {
         resolve(false);
@@ -78,28 +70,13 @@ async function updateActiveCompanyHistory(history) {
 }
 
 // ============================================================================
-// UTILITY FUNCTIONS
+// METRICS
 // ============================================================================
 
-function getTodayDateString() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function createEmptyMetrics() {
-  return {
-    date: getTodayDateString(),
-    reply: 0,
-    chat: 0,
-    inbound: 0,
-    outbound: 0,
-    lastUpdated: Date.now(),
-  };
-}
-
-// ============================================================================
-// STORAGE FUNCTIONS
-// ============================================================================
-
+/**
+ * Read the active company's metrics, rolling over to a fresh record (and
+ * archiving the old one) when the stored counts are from a previous day.
+ */
 async function getMetrics() {
   const company = await getActiveCompany();
 
@@ -107,73 +84,40 @@ async function getMetrics() {
     return createEmptyMetrics();
   }
 
-  let metrics = company.data.metrics || createEmptyMetrics();
+  const metrics = normalizeMetrics(company.data.metrics || createEmptyMetrics());
 
-  // Check for new day
-  if (metrics.date !== getTodayDateString()) {
-    // Archive and reset
-    await archiveMetrics(metrics, company.id);
-    metrics = createEmptyMetrics();
-    await updateActiveCompanyMetrics(metrics);
+  if (metrics.date === getTodayDateString()) {
+    return metrics;
   }
 
-  return metrics;
+  const history = normalizeHistory(company.data.history);
+
+  if (!history.some((entry) => entry.date === metrics.date)) {
+    const { lastUpdated, ...archived } = metrics;
+    history.push(archived);
+  }
+
+  const newMetrics = createEmptyMetrics();
+  await updateActiveCompany({ metrics: newMetrics, history: history.slice(-90) });
+
+  return newMetrics;
 }
-
-async function saveMetrics(metrics) {
-  metrics.lastUpdated = Date.now();
-  await updateActiveCompanyMetrics(metrics);
-  updateBadge(metrics);
-}
-
-async function archiveMetrics(oldMetrics, companyId) {
-  if (!oldMetrics.date) return;
-
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['companies'], (result) => {
-      const companies = result.companies || {};
-
-      if (!companies[companyId]) {
-        resolve();
-        return;
-      }
-
-      const history = companies[companyId].history || [];
-
-      // Don't duplicate
-      if (!history.some((h) => h.date === oldMetrics.date)) {
-        history.push({
-          date: oldMetrics.date,
-          reply: oldMetrics.reply || 0,
-          chat: oldMetrics.chat || 0,
-          inbound: oldMetrics.inbound || 0,
-          outbound: oldMetrics.outbound || 0,
-        });
-      }
-
-      // Keep last 90 days and update
-      companies[companyId].history = history.slice(-90);
-
-      chrome.storage.local.set({ companies }, resolve);
-    });
-  });
-}
-
-// ============================================================================
-// METRIC TRACKING
-// ============================================================================
 
 async function trackMetric(metricType) {
   const metrics = await getMetrics();
 
-  if (metrics[metricType] !== undefined) {
-    metrics[metricType]++;
-    await saveMetrics(metrics);
-    console.log(`[ZKT Background] Tracked ${metricType}:`, metrics[metricType]);
-    return { success: true, metrics };
+  if (metrics[metricType] === undefined) {
+    console.warn('[ZKT Background] Unknown metric type:', metricType);
+    return;
   }
 
-  return { success: false, error: 'Invalid metric type' };
+  metrics[metricType]++;
+  metrics.lastUpdated = Date.now();
+
+  await updateActiveCompany({ metrics });
+  updateBadge(metrics);
+
+  console.log(`[ZKT Background] Tracked ${metricType}:`, metrics[metricType]);
 }
 
 // ============================================================================
@@ -186,8 +130,7 @@ function updateBadge(metrics) {
     return;
   }
 
-  const total = (metrics.reply || 0) + (metrics.chat || 0) +
-                (metrics.inbound || 0) + (metrics.outbound || 0);
+  const total = metricsTotal(metrics);
 
   if (total > 0) {
     chrome.action.setBadgeText({ text: total.toString() });
@@ -201,37 +144,14 @@ function updateBadge(metrics) {
 // MESSAGE HANDLING
 // ============================================================================
 
+// Only the ticket-timer messages reach the service worker. Metric tracking is
+// done directly against chrome.storage by popup.js and content.js.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[ZKT Background] Message received:', message.type);
 
   (async () => {
     try {
       switch (message.type) {
-        case 'TRACK_METRIC': {
-          const result = await trackMetric(message.metric);
-          sendResponse(result);
-          break;
-        }
-
-        case 'GET_METRICS': {
-          const metrics = await getMetrics();
-          sendResponse({ success: true, metrics });
-          break;
-        }
-
-        case 'RESET_TODAY': {
-          const newMetrics = createEmptyMetrics();
-          await saveMetrics(newMetrics);
-          sendResponse({ success: true, metrics: newMetrics });
-          break;
-        }
-
-        case 'NEW_DAY_CHECK': {
-          const metrics = await getMetrics();
-          sendResponse({ success: true, metrics });
-          break;
-        }
-
         case 'TICKET_OPENED': {
           const { ticketId, startTime, accumulatedTime } = message.data;
           console.log(`[ZKT Background] Ticket #${ticketId} opened (accumulated: ${Math.round((accumulatedTime || 0) / 1000)}s)`);
@@ -245,12 +165,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.log(`[ZKT Background] Ticket #${ticketId} closed`);
           await clearTicketReminders(ticketId);
           sendResponse({ success: true });
-          break;
-        }
-
-        case 'GET_REMINDER_SETTINGS': {
-          const settings = await getReminderSettings();
-          sendResponse({ success: true, settings });
           break;
         }
 
@@ -353,21 +267,6 @@ async function clearTicketReminders(ticketId) {
 }
 
 /**
- * Clear all ticket reminder alarms
- */
-async function clearAllTicketReminders() {
-  const alarms = await chrome.alarms.getAll();
-
-  for (const alarm of alarms) {
-    if (alarm.name.startsWith(TICKET_ALARM_PREFIX)) {
-      await chrome.alarms.clear(alarm.name);
-    }
-  }
-
-  console.log('[ZKT Background] Cleared all ticket reminder alarms');
-}
-
-/**
  * Handle alarm trigger - show notification
  */
 async function handleTicketReminderAlarm(alarmName) {
@@ -428,19 +327,12 @@ function setupContextMenu() {
       documentUrlPatterns: ['*://*.zendesk.com/*'],
     });
 
-    // Create sub-menu items
-    const items = [
-      { id: 'zkt-reply', title: '+ Reply Sent' },
-      { id: 'zkt-chat', title: '+ Chat Completed' },
-      { id: 'zkt-inbound', title: '+ Inbound Call' },
-      { id: 'zkt-outbound', title: '+ Outbound Call' },
-    ];
-
-    items.forEach((item) => {
+    // One sub-menu item per tracked metric
+    METRICS.forEach((metric) => {
       chrome.contextMenus.create({
-        id: item.id,
+        id: `${CONTEXT_MENU_PREFIX}${metric.key}`,
         parentId: 'zkt-parent',
-        title: item.title,
+        title: `+ ${metric.short}`,
         contexts: ['page'],
         documentUrlPatterns: ['*://*.zendesk.com/*'],
       });
@@ -450,17 +342,9 @@ function setupContextMenu() {
   });
 }
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  const metricMap = {
-    'zkt-reply': 'reply',
-    'zkt-chat': 'chat',
-    'zkt-inbound': 'inbound',
-    'zkt-outbound': 'outbound',
-  };
-
-  const metric = metricMap[info.menuItemId];
-  if (metric) {
-    trackMetric(metric);
+chrome.contextMenus.onClicked.addListener((info) => {
+  if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith(CONTEXT_MENU_PREFIX)) {
+    trackMetric(info.menuItemId.slice(CONTEXT_MENU_PREFIX.length));
   }
 });
 
@@ -473,15 +357,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   // Initialize storage on first install
   if (details.reason === 'install') {
-    const companyId = 'company_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const companyId = `company_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 
     chrome.storage.local.set({
       companies: {
         [companyId]: {
           name: 'Default Company',
           color: '#5046e5',
+          zendeskSubdomain: null,
           metrics: createEmptyMetrics(),
-          goals: DEFAULT_GOALS,
+          goals: { ...DEFAULT_GOALS },
           history: [],
           ticketTimeCache: { date: getTodayDateString(), tickets: {} },
           ticketHistory: []
@@ -512,10 +397,11 @@ chrome.runtime.onStartup.addListener(async () => {
   setupContextMenu();
 });
 
-// Listen for storage changes to update badge
+// Listen for storage changes to update badge. Metrics are nested inside the
+// `companies` record, so that - and the active company - is what to watch.
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local' && changes.metrics) {
-    updateBadge(changes.metrics.newValue);
+  if (namespace === 'local' && (changes.companies || changes.activeCompanyId)) {
+    getMetrics().then(updateBadge);
   }
 });
 

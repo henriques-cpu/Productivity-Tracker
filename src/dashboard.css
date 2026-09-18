@@ -267,21 +267,21 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.section-row-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.section-col,
 .section-col-6 {
   min-width: 0;
 }
 
 /* ===== Card Grids ===== */
+.cards-grid-3,
 .cards-grid-4 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1.5rem;
-}
-
-.cards-grid-5 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.25rem;
 }
 
 /* ===== Metric Cards ===== */
@@ -314,7 +314,6 @@ body {
 .card-blue { color: var(--accent-blue); }
 .card-green { color: var(--accent-green); }
 .card-orange { color: var(--accent-orange); }
-.card-purple { color: var(--accent-purple); }
 
 .card-header {
   display: flex;
@@ -592,11 +591,6 @@ body {
   color: var(--accent-orange);
 }
 
-.badge-purple {
-  background: rgba(112, 48, 160, 0.2);
-  color: var(--accent-purple);
-}
-
 .change-indicator {
   display: inline-flex;
   align-items: center;
@@ -844,10 +838,6 @@ body {
   margin-bottom: 0.5rem;
 }
 
-.goal-icon {
-  font-size: 1.25rem;
-}
-
 .settings-group input {
   width: 100%;
   background: var(--bg-tertiary);
@@ -911,10 +901,6 @@ body {
   .dashboard-content {
     max-width: 100%;
   }
-
-  .cards-grid-5 {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
 }
 
 @media (max-width: 1024px) {
@@ -930,10 +916,12 @@ body {
     padding: 1.5rem;
   }
 
-  .section-row {
+  .section-row,
+  .section-row-3 {
     grid-template-columns: 1fr;
   }
 
+  .cards-grid-3,
   .cards-grid-4 {
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   }
@@ -970,8 +958,8 @@ body {
     white-space: nowrap;
   }
 
+  .cards-grid-3,
   .cards-grid-4,
-  .cards-grid-5,
   .insights-grid {
     grid-template-columns: 1fr;
   }
@@ -1057,116 +1045,6 @@ body {
 
 .empty-state p {
   font-size: 0.95rem;
-}
-
-/* ===== Total Replies Summary ===== */
-.replies-summary-grid {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 1.5rem;
-}
-
-.replies-total-card {
-  background: linear-gradient(135deg, var(--accent-blue), #4338ca);
-  border-radius: 12px;
-  padding: 2rem;
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  box-shadow: var(--shadow-md);
-}
-
-.replies-total-icon {
-  width: 64px;
-  height: 64px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
-
-.replies-total-info {
-  flex: 1;
-}
-
-.replies-total-label {
-  font-size: 0.875rem;
-  color: rgba(255, 255, 255, 0.8);
-  margin-bottom: 0.5rem;
-}
-
-.replies-total-value {
-  font-size: 3rem;
-  font-weight: 700;
-  color: white;
-  line-height: 1;
-}
-
-.replies-breakdown {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-}
-
-.reply-channel-card {
-  background: var(--bg-card);
-  border-radius: 12px;
-  padding: 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  border: 1px solid var(--border-color);
-  transition: var(--transition);
-}
-
-.reply-channel-card:hover {
-  border-color: var(--accent-blue);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-
-.channel-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.channel-icon.email {
-  background: rgba(80, 70, 229, 0.15);
-  color: var(--accent-blue);
-}
-
-.channel-icon.sms {
-  background: rgba(217, 119, 6, 0.15);
-  color: var(--accent-orange);
-}
-
-.channel-icon.chat {
-  background: rgba(5, 150, 105, 0.15);
-  color: var(--accent-green);
-}
-
-.channel-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.channel-label {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.channel-value {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--text-primary);
 }
 
 /* ===== Ticket Time Statistics ===== */
@@ -1297,20 +1175,12 @@ body {
 
 /* Responsive adjustments */
 @media (max-width: 1200px) {
-  .replies-summary-grid {
-    grid-template-columns: 1fr;
-  }
-
   .ticket-stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 768px) {
-  .replies-breakdown {
-    grid-template-columns: 1fr;
-  }
-
   .ticket-stats-grid {
     grid-template-columns: 1fr;
   }

@@ -31,20 +31,8 @@ const SELECTORS = {
     'Messaging',
   ],
 
-  // CHAT - End chat buttons and indicators
-  CHAT_END_BUTTONS: [
-    '[data-test-id="end-chat-button"]',
-    '[data-test-id="chat-end"]',
-    '[aria-label="End chat"]',
-    '[aria-label="End Chat"]',
-    'button[title="End chat"]',
-    '[data-action="end-chat"]',
-  ],
-
-  CHAT_END_TEXT: ['end chat', 'end conversation', 'close chat'],
-
-  // CALLS - CTI/Talk indicators
-  CTI_CALL_END_BUTTONS: [
+  // CALLS - Talk/CTI hang-up controls
+  CALL_END_BUTTONS: [
     '[data-test-id="end-call-button"]',
     '[data-test-id="hangup-button"]',
     '[aria-label="End call"]',
@@ -52,43 +40,25 @@ const SELECTORS = {
     '[data-test-id="talk-hangup"]',
   ],
 
-  CTI_CALL_END_TEXT: ['end call', 'hang up', 'hangup'],
-
-  // Inbound call indicators (when call starts)
-  CTI_INBOUND_INDICATORS: [
-    '[data-test-id="incoming-call"]',
-    '[data-call-direction="inbound"]',
-    '[aria-label*="incoming"]',
-    '[aria-label*="Incoming"]',
-  ],
-
-  // Outbound call indicators (dial button)
-  CTI_OUTBOUND_TRIGGERS: [
-    '[data-test-id="dial-button"]',
-    '[data-test-id="make-call"]',
-    '[aria-label="Dial"]',
-    '[aria-label="Make call"]',
-    '[aria-label="Call"]',
-  ],
+  CALL_END_TEXT: ['end call', 'hang up', 'hangup'],
 };
 
 // ============================================================================
-// DEBUG MODE - Set to true to see all click events in console
+// DEBUG MODE - Set to true to log every intercepted API response
 // ============================================================================
 
-const DEBUG_MODE = true;
+const DEBUG_MODE = false;
 
 // ============================================================================
 // STATE
 // ============================================================================
 
 const state = {
-  lastCallDirection: null,
-  isCallActive: false,
   lastEventTime: {},
   debounceMs: 2000, // Prevent double-counting within 2 seconds
   recentReplyEventIds: new Map(),
   lastReplyTrackedAt: 0,
+  lastResolvedChannel: null,
   // Ticket time tracking
   currentTicketId: null,
   ticketStartTime: null,
@@ -98,26 +68,14 @@ const state = {
 // UTILITY FUNCTIONS
 // ============================================================================
 
+const { getTodayDateString, createEmptyMetrics, normalizeMetrics } = Metrics;
+
 function log(...args) {
   console.log('[ZKT Content]', ...args);
 }
 
-function getTodayDateString() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function createEmptyMetrics() {
-  return {
-    date: getTodayDateString(),
-    reply: 0, // Keep for backwards compatibility and total count
-    replyEmail: 0,
-    replySMS: 0,
-    replyChat: 0,
-    chat: 0,
-    inbound: 0,
-    outbound: 0,
-    lastUpdated: Date.now(),
-  };
+function debugLog(...args) {
+  if (DEBUG_MODE) log(...args);
 }
 
 // ============================================================================
@@ -211,20 +169,25 @@ function isDuplicateReplyEvent(eventId) {
   return false;
 }
 
-function trackReplyWithDedup(channel, eventId) {
+/**
+ * Track a reply unless it is a repeat of one we already counted.
+ * @returns {boolean} Whether the reply was counted.
+ */
+function trackReplyWithDedup(eventId) {
   if (eventId && isDuplicateReplyEvent(eventId)) {
-    return;
+    return false;
   }
 
   // Universal time-based dedup: only one reply tracked per 5-second window.
   const msSinceLastReply = Date.now() - (state.lastReplyTrackedAt || 0);
   if (msSinceLastReply < 5000) {
     log(`Suppressed duplicate reply tracking ${msSinceLastReply}ms after last tracked reply`);
-    return;
+    return false;
   }
 
   state.lastReplyTrackedAt = Date.now();
-  trackMetric('reply', channel);
+  trackMetric('reply');
+  return true;
 }
 
 // NOTE: Fetch and XHR interception is handled in inject.js (runs in page context).
@@ -256,84 +219,51 @@ function matchesTextPattern(element, patterns) {
 }
 
 /**
- * Check if the composer is in "Public reply" mode (not internal note)
- * Returns object with isPublic flag and channel type
- * @returns {{isPublic: boolean, channel?: string}} Reply mode info
+ * Check if the composer is in "Public reply" mode (not internal note).
+ *
+ * This is only a fallback for API payloads that don't carry a public flag;
+ * the intercepted response is the primary source of truth.
+ *
+ * @returns {boolean} Whether the composer is composing a public reply.
  */
 function isPublicReplyMode() {
-  // Find the channel switcher button
   const channelSwitcher = document.querySelector(SELECTORS.CHANNEL_SWITCHER);
 
   if (!channelSwitcher) {
     // If no channel switcher found, assume it's a reply (older Zendesk UI)
     log('No channel switcher found, assuming public reply');
-    return { isPublic: true, channel: null };
+    return true;
   }
 
-  // Check the aria-label to determine the current mode
   const ariaLabel = channelSwitcher.getAttribute('aria-label') || '';
   const dataChannel = channelSwitcher.getAttribute('data-channel') || '';
 
-  if (DEBUG_MODE) {
-    log('Channel switcher found:', { ariaLabel, dataChannel });
-  }
+  debugLog('Channel switcher found:', { ariaLabel, dataChannel });
 
-  // Check if it's internal note mode
   if (ariaLabel.toLowerCase().includes('internal') || dataChannel === 'internal') {
     log('Internal note mode detected - NOT tracking as reply');
-    return { isPublic: false };
+    return false;
   }
 
-  // Detect specific channel type from data-channel attribute (primary) or aria-label (fallback)
-  const ariaLabelLower = ariaLabel.toLowerCase();
-  let channel = null;
-
-  // Priority 1: Use data-channel attribute (more reliable after Zendesk UI updates)
-  if (dataChannel) {
-    const dataChannelLower = dataChannel.toLowerCase();
-    if (dataChannelLower === 'sms') {
-      channel = 'sms';
-    } else if (dataChannelLower === 'web' || dataChannelLower === 'email') {
-      channel = 'email';
-    } else if (dataChannelLower === 'native_messaging' || dataChannelLower === 'chat') {
-      channel = 'chat';
-    }
-  }
-
-  // Priority 2: Fallback to aria-label if data-channel didn't match
-  if (!channel) {
-    if (ariaLabelLower.includes('email')) {
-      channel = 'email';
-    } else if (ariaLabelLower.includes('sms')) {
-      channel = 'sms';
-    } else if (ariaLabelLower.includes('chat') || ariaLabelLower.includes('messaging')) {
-      channel = 'chat';
-    }
-  }
-
-  // Check if it's a known internal note mode (already handled above)
-  // Otherwise, check if it matches any public reply indicator
-  const isPublic = SELECTORS.PUBLIC_REPLY_INDICATORS.some(
-    indicator => ariaLabelLower.includes(indicator.toLowerCase())
+  // Anything that isn't explicitly an internal note counts as public. Matching
+  // a known indicator is only used to make the log message accurate, so
+  // localised and redesigned Zendesk UIs still track correctly.
+  const recognized = SELECTORS.PUBLIC_REPLY_INDICATORS.some(
+    (indicator) => ariaLabel.toLowerCase().includes(indicator.toLowerCase())
   );
 
-  if (isPublic) {
-    log(`Public reply mode detected - Channel: ${channel || 'untracked'}`);
-    return { isPublic: true, channel };
-  }
+  log(recognized
+    ? 'Public reply mode detected'
+    : `Channel switcher label not recognized ("${ariaLabel}"), assuming public reply`);
 
-  // If channel switcher exists but aria-label doesn't match known indicators,
-  // treat as public if it's not explicitly internal (already checked above).
-  // This handles localized/translated Zendesk UIs and UI version differences.
-  log(`Channel switcher label not recognized ("${ariaLabel}"), assuming public reply`);
-  return { isPublic: true, channel };
+  return true;
 }
 
 // ============================================================================
 // STORAGE FUNCTIONS (Direct storage access for reliability)
 // ============================================================================
 
-async function trackMetric(metricType, channel = null) {
+async function trackMetric(metricType) {
   if (shouldDebounce(metricType)) return;
 
   // Check if tracking is enabled
@@ -345,7 +275,7 @@ async function trackMetric(metricType, channel = null) {
     return;
   }
 
-  log(`Tracking: ${metricType}${channel ? ` (${channel})` : ''}`);
+  log(`Tracking: ${metricType}`);
 
   try {
     // Get active company
@@ -356,49 +286,29 @@ async function trackMetric(metricType, channel = null) {
       return;
     }
 
-    let metrics = company.data.metrics || createEmptyMetrics();
+    let metrics = normalizeMetrics(company.data.metrics || createEmptyMetrics());
 
-    // Check for new day
+    // Check for new day - archive yesterday's counts before starting fresh
     if (metrics.date !== getTodayDateString()) {
-      // Archive old metrics
-      const history = company.data.history || [];
-
-      if (metrics.date) {
-        history.push({
-          date: metrics.date,
-          reply: metrics.reply || 0,
-          replyEmail: metrics.replyEmail || 0,
-          replySMS: metrics.replySMS || 0,
-          replyChat: metrics.replyChat || 0,
-          chat: metrics.chat || 0,
-          inbound: metrics.inbound || 0,
-          outbound: metrics.outbound || 0,
-        });
-        await updateCompanyDataById(company.id, { history: history.slice(-90) });
-      }
+      const history = Metrics.normalizeHistory(company.data.history);
+      const { lastUpdated, ...archived } = metrics;
+      history.push(archived);
+      await updateCompanyDataById(company.id, { history: history.slice(-90) });
 
       metrics = createEmptyMetrics();
     }
 
-    // Increment the metric
-    if (metrics[metricType] !== undefined) {
-      metrics[metricType]++;
-
-      // If tracking a reply with channel info, also increment channel-specific counter
-      if (metricType === 'reply' && channel) {
-        const channelKey = `reply${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
-        if (metrics[channelKey] !== undefined) {
-          metrics[channelKey]++;
-          log(`Tracked ${channelKey}:`, metrics[channelKey]);
-        }
-      }
-
-      metrics.lastUpdated = Date.now();
-      await updateCompanyDataById(company.id, { metrics });
-
-      log(`Tracked ${metricType}:`, metrics[metricType]);
-      showNotification(metricType);
+    if (metrics[metricType] === undefined) {
+      log(`Unknown metric type: ${metricType}`);
+      return;
     }
+
+    metrics[metricType]++;
+    metrics.lastUpdated = Date.now();
+    await updateCompanyDataById(company.id, { metrics });
+
+    log(`Tracked ${metricType}:`, metrics[metricType]);
+    showNotification(metricType);
   } catch (error) {
     log('Error tracking metric:', error);
   }
@@ -411,9 +321,8 @@ async function trackMetric(metricType, channel = null) {
 function showNotification(metricType) {
   const labels = {
     reply: 'Reply Sent',
-    chat: 'Chat Completed',
-    inbound: 'Inbound Call',
-    outbound: 'Outbound Call',
+    chat: 'Chat Handled',
+    call: 'Call',
   };
 
   // Create notification element
@@ -755,30 +664,6 @@ function hideTimePopup() {
 // ============================================================================
 
 /**
- * Get debug info about an element for logging
- */
-function getElementDebugInfo(element) {
-  if (!element) return 'null';
-
-  const info = {
-    tag: element.tagName?.toLowerCase(),
-    id: element.id || null,
-    classes: element.className || null,
-    type: element.getAttribute('type'),
-    'data-test-id': element.getAttribute('data-test-id'),
-    'aria-label': element.getAttribute('aria-label'),
-    text: (element.textContent || '').trim().substring(0, 50),
-  };
-
-  // Remove null values for cleaner output
-  Object.keys(info).forEach(key => {
-    if (info[key] === null || info[key] === '') delete info[key];
-  });
-
-  return info;
-}
-
-/**
  * Find the nearest button/interactive element from click target
  */
 function findInteractiveParent(element, maxDepth = 5) {
@@ -800,7 +685,12 @@ function findInteractiveParent(element, maxDepth = 5) {
 }
 
 /**
- * Handle click events for tracking
+ * Handle click events for tracking.
+ *
+ * Calls are the only metric still detected from the DOM: Talk runs in a CTI
+ * panel that makes no ticket API call we can observe, so hanging up is the
+ * signal. Inbound and outbound are counted the same way - Zendesk exposes no
+ * direction marker we could read reliably.
  */
 function handleClick(event) {
   const rawTarget = event.target;
@@ -809,79 +699,13 @@ function handleClick(event) {
   // Find the actual interactive element (user might click on icon inside button)
   const target = findInteractiveParent(rawTarget);
 
-  // Check for Chat End buttons
-  if (matchesAnySelector(target, SELECTORS.CHAT_END_BUTTONS)) {
-    log('End chat button clicked (selector match)');
-    setTimeout(() => trackMetric('chat'), 300);
-    return;
-  }
+  const endsCall = matchesAnySelector(target, SELECTORS.CALL_END_BUTTONS) ||
+    (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.CALL_END_TEXT));
 
-  // Check button text for chat end
-  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.CHAT_END_TEXT)) {
-    log('End chat button clicked (text match)');
-    setTimeout(() => trackMetric('chat'), 300);
-    return;
-  }
-
-  // Check for Call End buttons
-  if (matchesAnySelector(target, SELECTORS.CTI_CALL_END_BUTTONS)) {
+  if (endsCall) {
     log('End call button clicked');
-    const metric = state.lastCallDirection === 'outbound' ? 'outbound' : 'inbound';
-    setTimeout(() => trackMetric(metric), 300);
-    state.isCallActive = false;
-    state.lastCallDirection = null;
-    return;
+    setTimeout(() => trackMetric('call'), 300);
   }
-
-  // Check button text for call end
-  if (target.tagName === 'BUTTON' && matchesTextPattern(target, SELECTORS.CTI_CALL_END_TEXT)) {
-    log('End call button clicked (text match)');
-    const metric = state.lastCallDirection === 'outbound' ? 'outbound' : 'inbound';
-    setTimeout(() => trackMetric(metric), 300);
-    state.isCallActive = false;
-    state.lastCallDirection = null;
-    return;
-  }
-
-  // Check for Outbound Call triggers (dial button)
-  if (matchesAnySelector(target, SELECTORS.CTI_OUTBOUND_TRIGGERS)) {
-    log('Outbound call initiated');
-    state.lastCallDirection = 'outbound';
-    state.isCallActive = true;
-    return;
-  }
-}
-
-// ============================================================================
-// MUTATION OBSERVER (for DOM changes)
-// ============================================================================
-
-function setupMutationObserver() {
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type !== 'childList') continue;
-
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-
-        // Check for incoming call indicators
-        if (matchesAnySelector(node, SELECTORS.CTI_INBOUND_INDICATORS)) {
-          log('Inbound call detected');
-          state.lastCallDirection = 'inbound';
-          state.isCallActive = true;
-        }
-
-      }
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
-
-  log('MutationObserver started');
-  return observer;
 }
 
 // ============================================================================
@@ -971,11 +795,14 @@ window.ZKT = {
     return data;
   },
 
-  // Toggle debug mode
-  debug: (enabled) => {
-    window.ZKT_DEBUG = enabled;
-    console.log(`[ZKT] Debug mode: ${enabled ? 'ON' : 'OFF'}`);
-  }
+  // Show which Zendesk channel this ticket's conversation is on. Useful when
+  // chats are not being counted - see resolveConversationChannel() below.
+  channel: () => {
+    const channel = state.lastResolvedChannel;
+    console.log('[ZKT] Last resolved conversation channel:', channel || '(none seen yet)');
+    console.log('[ZKT] Counts as a chat:', Metrics.isChatChannel(channel));
+    return channel;
+  },
 };
 
 // ============================================================================
@@ -1036,6 +863,118 @@ function extractReplyEventId(url, response) {
   if (convoEventId) return `gql-event-${convoEventId}`;
 
   return null;
+}
+
+// ============================================================================
+// CONVERSATION CHANNEL DETECTION (drives the chat metric)
+// ============================================================================
+
+// Zendesk channel identifiers we recognise. Anything outside this list is
+// ignored rather than guessed at, so an unrelated "channel" field somewhere in
+// a payload can never be mistaken for the conversation's channel.
+const KNOWN_CHANNELS = [
+  'api', 'chat', 'email', 'facebook', 'line', 'messaging', 'native_messaging',
+  'sms', 'twitter', 'voice', 'web', 'web_widget', 'whatsapp',
+];
+
+const MAX_CHANNEL_SEARCH_DEPTH = 6;
+
+/**
+ * Read a channel identifier out of a value that may be a plain string or a
+ * wrapper object (GraphQL tends to nest it under `name`).
+ */
+function normalizeChannelValue(value) {
+  if (typeof value === 'string') {
+    const channel = value.toLowerCase();
+    return KNOWN_CHANNELS.includes(channel) ? channel : null;
+  }
+
+  if (value && typeof value === 'object') {
+    return normalizeChannelValue(value.name ?? value.channel ?? value.type);
+  }
+
+  return null;
+}
+
+/**
+ * Walk a payload looking for a `channel` (or `via.channel`) field.
+ * Breadth first, so shallower - and therefore more ticket-level - matches win.
+ */
+function findChannelDeep(nodes, depth) {
+  if (depth > MAX_CHANNEL_SEARCH_DEPTH) return null;
+
+  const children = [];
+
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'channel' || key === 'via') {
+        const channel = normalizeChannelValue(key === 'via' ? value?.channel : value);
+        if (channel) return channel;
+      }
+      children.push(value);
+    }
+  }
+
+  return children.length > 0 ? findChannelDeep(children, depth + 1) : null;
+}
+
+/**
+ * Work out which Zendesk channel a conversation is on from an intercepted
+ * API payload.
+ *
+ * The ticket-level `via.channel` is what says "this conversation is a chat".
+ * A comment's own `via.channel` only describes how the agent typed the reply
+ * (almost always `web`), so the ticket is checked first and the generic search
+ * is a fallback for payload shapes we haven't seen.
+ */
+function resolveConversationChannel(payload) {
+  const ticketLevel = [
+    payload?.ticket?.via?.channel,
+    payload?.data?.ticket?.via?.channel,
+    payload?.data?.ticket?.channel,
+    payload?.audit?.via?.channel,
+  ];
+
+  for (const value of ticketLevel) {
+    const channel = normalizeChannelValue(value);
+    if (channel) return channel;
+  }
+
+  return findChannelDeep([payload], 0);
+}
+
+/**
+ * Count a chat.
+ *
+ * A "chat" is one messaging/chat conversation the agent took part in, counted
+ * once per ticket per day. Zendesk Agent Workspace has no "end chat" button to
+ * hook - messaging conversations are ordinary tickets - so the signal is the
+ * agent's public reply on a ticket whose channel is a chat channel. Replying
+ * again to the same conversation adds replies, not chats.
+ */
+async function trackChatConversation(ticketId, channel) {
+  if (!ticketId || !Metrics.isChatChannel(channel)) return;
+
+  const company = await getTrackingCompany();
+  if (!company) return;
+
+  const today = getTodayDateString();
+  const counted = company.data.chatTickets;
+  const ticketIds = counted?.date === today ? (counted.ticketIds || []) : [];
+
+  if (ticketIds.includes(ticketId)) {
+    log(`Chat ticket #${ticketId} already counted today`);
+    return;
+  }
+
+  await updateCompanyDataById(company.id, {
+    chatTickets: { date: today, ticketIds: [...ticketIds, ticketId] },
+  });
+
+  log(`New ${channel} conversation on ticket #${ticketId} - counting a chat`);
+  trackMetric('chat');
 }
 
 /**
@@ -1124,7 +1063,7 @@ function analyzeGraphQLResponse(response, requestBody) {
 
   // If we can't determine from response or request, check UI state
   log('Could not determine public flag from response or request, checking UI');
-  return isPublicReplyMode().isPublic;
+  return isPublicReplyMode();
 }
 
 /**
@@ -1156,7 +1095,7 @@ function analyzeBFFConvoLogResponse(response) {
   const now = Date.now();
   const ageInSeconds = (now - eventTimestamp) / 1000;
 
-  log('BFFConvoLogQuery: Checking most recent event:', {
+  debugLog('BFFConvoLogQuery: Checking most recent event:', {
     id: event.id,
     typename: event.__typename,
     actor: event.actor?.name,
@@ -1213,7 +1152,8 @@ function analyzeRestApiResponse(response, requestBody) {
   const comment = response?.comment || response?.ticket?.latest_comment;
 
   if (comment) {
-    log('Comment found in REST response:', comment);
+    // Only the id is logged - comment bodies are customer data.
+    log('Comment found in REST response:', comment.id);
 
     // Check public flag in response (most reliable)
     if (comment.public !== undefined) {
@@ -1238,7 +1178,7 @@ function analyzeRestApiResponse(response, requestBody) {
 
   // Last resort: check UI state
   log('Could not determine public flag from REST response, checking UI');
-  return isPublicReplyMode().isPublic;
+  return isPublicReplyMode();
 }
 
 // ============================================================================
@@ -1252,22 +1192,23 @@ window.addEventListener('message', (event) => {
   // Handle API responses (PRIMARY detection method - most reliable!)
   if (event.data.type === 'ZKT_API_RESPONSE') {
     const { url, response, requestBody } = event.data.data;
-    log('API Response intercepted:', { url, response });
+    debugLog('API Response intercepted:', { url, response });
 
     // Analyze response to detect public reply submissions
-    const replyDetected = analyzeApiResponse(url, response, requestBody);
-    if (replyDetected) {
-      const eventId = extractReplyEventId(url, response);
-      // API response already confirmed this is a public reply - trust it.
-      // Only use the UI to detect the channel type (email, sms, chat).
-      const replyMode = isPublicReplyMode();
-      const channel = replyMode.channel || null;
-      log('✓ Public reply confirmed via API response - tracking');
-      log('Channel detection result:', { channel, uiPublic: replyMode.isPublic });
-      trackReplyWithDedup(channel, eventId);
-    }
-  }
+    if (!analyzeApiResponse(url, response, requestBody)) return;
 
+    log('✓ Public reply confirmed via API response - tracking');
+
+    const eventId = extractReplyEventId(url, response);
+    if (!trackReplyWithDedup(eventId)) return;
+
+    // The same confirmed reply tells us whether this conversation is a chat.
+    const channel = resolveConversationChannel(response);
+    state.lastResolvedChannel = channel;
+    log('Conversation channel:', channel || 'unknown');
+
+    trackChatConversation(getCurrentTicketId(), channel);
+  }
 });
 
 // ============================================================================
@@ -1548,9 +1489,6 @@ async function init() {
 
   // Add click listener (capture phase to catch all clicks)
   document.addEventListener('click', handleClick, true);
-
-  // Setup mutation observer for DOM changes
-  setupMutationObserver();
 
   // Setup ticket time tracking
   setupUrlChangeDetection();

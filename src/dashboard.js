@@ -1,26 +1,34 @@
 // ===== Zendesk KPI Dashboard =====
 // Power BI-Inspired Analytics Dashboard
 
+const {
+  METRICS,
+  METRIC_KEYS,
+  DEFAULT_GOALS,
+  getTodayDateString: getTodayDate,
+  createEmptyMetrics,
+  normalizeMetrics,
+  normalizeGoals,
+  normalizeHistory,
+  metricsTotal,
+} = Metrics;
+
 // Global State
 let currentData = {
-  metrics: { date: '', reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 },
+  metrics: createEmptyMetrics(),
   history: [],
-  goals: { reply: 20 },
+  goals: { ...DEFAULT_GOALS },
   ticketTimeCache: { date: '', tickets: {} },
   ticketHistory: []
 };
 let currentRange = 7;
 let charts = {};
 
-// Color Palette
-const COLORS = {
-  reply: '#5046e5',
-  chat: '#059669',
-  inbound: '#d97706',
-  outbound: '#7b1fa2',
-  grid: '#3d3d3d',
-  text: '#b3b3b3'
-};
+// Color Palette - one entry per metric, plus the chart chrome
+const COLORS = METRICS.reduce((colors, metric) => {
+  colors[metric.key] = metric.color;
+  return colors;
+}, { grid: '#3d3d3d', text: '#b3b3b3' });
 
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -66,8 +74,9 @@ function initializeEventListeners() {
 // ===== Data Loading =====
 async function loadData() {
   try {
-    // Migrate to multi-company structure if needed
+    // Migrate to multi-company structure and the current metric schema
     await StorageUtils.migrateToMultiCompany();
+    await StorageUtils.migrateMetricsSchema();
 
     // Get active company data
     const company = await StorageUtils.getActiveCompany();
@@ -89,9 +98,9 @@ async function loadData() {
     }
 
     // Load company data
-    currentData.metrics = company.data.metrics || { date: getTodayDate(), reply: 0, chat: 0, inbound: 0, outbound: 0, replyEmail: 0, replySMS: 0, replyChat: 0 };
-    currentData.history = company.data.history || [];
-    currentData.goals = company.data.goals || { reply: 20 };
+    currentData.metrics = normalizeMetrics(company.data.metrics);
+    currentData.history = normalizeHistory(company.data.history);
+    currentData.goals = normalizeGoals(company.data.goals);
     currentData.ticketTimeCache = company.data.ticketTimeCache || { date: getTodayDate(), tickets: {} };
     currentData.ticketHistory = company.data.ticketHistory || [];
 
@@ -131,16 +140,12 @@ function renderOverviewTab() {
   const yesterday = getYesterdayData();
 
   // Today's Performance Cards
-  updateMetricCard('reply', metrics.reply, goals.reply, yesterday.reply);
-  updateMetricCardNoGoal('chat', metrics.chat, yesterday.chat);
-  updateMetricCardNoGoal('inbound', metrics.inbound, yesterday.inbound);
-  updateMetricCardNoGoal('outbound', metrics.outbound, yesterday.outbound);
+  METRIC_KEYS.forEach((key) => {
+    updateMetricCard(key, metrics[key], goals[key], yesterday[key]);
+  });
 
   // Summary Statistics
   updateSummaryStats();
-
-  // Total Replies Summary
-  renderRepliesSummary();
 
   // Ticket Time Statistics
   renderTicketTimeStats();
@@ -151,33 +156,26 @@ function renderOverviewTab() {
   createGoalCompletionChart();
 }
 
-function updateMetricCard(metric, value, goal, yesterdayValue) {
-  const capitalMetric = metric.charAt(0).toUpperCase() + metric.slice(1);
-  const progress = (value / goal) * 100;
-  const change = value - yesterdayValue;
-  const changeText = change >= 0 ? `+${change}` : `${change}`;
-  const changeClass = change >= 0 ? 'positive' : 'negative';
-
-  document.getElementById(`today${capitalMetric}`).textContent = value;
-  document.getElementById(`goal${capitalMetric}`).textContent = goal;
-  document.getElementById(`progress${capitalMetric}`).style.width = `${Math.min(progress, 100)}%`;
-
-  const changeEl = document.getElementById(`change${capitalMetric}`);
-  changeEl.textContent = `${changeText} from yesterday`;
-  changeEl.className = `card-change ${changeClass}`;
+/**
+ * Element ids are built from the metric key, e.g. `call` -> `todayCall`.
+ */
+function capitalize(key) {
+  return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-function updateMetricCardNoGoal(metric, value, yesterdayValue) {
-  const capitalMetric = metric.charAt(0).toUpperCase() + metric.slice(1);
+function updateMetricCard(metric, value, goal, yesterdayValue) {
+  const suffix = capitalize(metric);
+  const progress = goal > 0 ? (value / goal) * 100 : 0;
   const change = value - yesterdayValue;
   const changeText = change >= 0 ? `+${change}` : `${change}`;
-  const changeClass = change >= 0 ? 'positive' : 'negative';
 
-  document.getElementById(`today${capitalMetric}`).textContent = value;
+  document.getElementById(`today${suffix}`).textContent = value;
+  document.getElementById(`goal${suffix}`).textContent = goal;
+  document.getElementById(`progress${suffix}`).style.width = `${Math.min(progress, 100)}%`;
 
-  const changeEl = document.getElementById(`change${capitalMetric}`);
+  const changeEl = document.getElementById(`change${suffix}`);
   changeEl.textContent = `${changeText} from yesterday`;
-  changeEl.className = `card-change ${changeClass}`;
+  changeEl.className = `card-change ${change >= 0 ? 'positive' : 'negative'}`;
 }
 
 function updateSummaryStats() {
@@ -193,22 +191,6 @@ function updateSummaryStats() {
   document.getElementById('bestDayValue').textContent = bestDay.total;
   document.getElementById('bestDayDate').textContent = bestDay.date;
   document.getElementById('goalAchievement').textContent = `${goalRate}%`;
-}
-
-// ===== Total Replies Summary =====
-function renderRepliesSummary() {
-  const { metrics } = currentData;
-
-  // Total replies today (sum of all channels, or use total reply count)
-  const totalReplies = metrics.reply || 0;
-  const emailReplies = metrics.replyEmail || 0;
-  const smsReplies = metrics.replySMS || 0;
-  const chatReplies = metrics.replyChat || 0;
-
-  document.getElementById('totalRepliesToday').textContent = totalReplies;
-  document.getElementById('replyEmailCount').textContent = emailReplies;
-  document.getElementById('replySMSCount').textContent = smsReplies;
-  document.getElementById('replyChatCount').textContent = chatReplies;
 }
 
 // ===== Ticket Time Statistics =====
@@ -305,6 +287,21 @@ function renderTrendsTab() {
   createWeeklyComparisonChart();
 }
 
+/**
+ * One dataset per metric, reading its series from `pick`.
+ * @param {(metricKey: string) => number[]} pick
+ * @param {object} [extra] Dataset properties merged into every series.
+ */
+function metricDatasets(pick, extra = {}) {
+  return METRICS.map(metric => ({
+    label: metric.plural,
+    data: pick(metric.key),
+    borderColor: metric.color,
+    backgroundColor: metric.color,
+    ...extra
+  }));
+}
+
 function createTrendsLineChart() {
   const ctx = document.getElementById('trendsLineChart');
   if (!ctx) return;
@@ -318,74 +315,44 @@ function createTrendsLineChart() {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        {
-          label: 'Replies',
-          data: rangeData.map(d => d.reply),
-          borderColor: COLORS.reply,
-          backgroundColor: COLORS.reply + '33',
-          tension: 0.4,
-          fill: true
-        },
-        {
-          label: 'Chats',
-          data: rangeData.map(d => d.chat),
-          borderColor: COLORS.chat,
-          backgroundColor: COLORS.chat + '33',
-          tension: 0.4,
-          fill: true
-        },
-        {
-          label: 'Inbound Calls',
-          data: rangeData.map(d => d.inbound),
-          borderColor: COLORS.inbound,
-          backgroundColor: COLORS.inbound + '33',
-          tension: 0.4,
-          fill: true
-        },
-        {
-          label: 'Outbound Calls',
-          data: rangeData.map(d => d.outbound),
-          borderColor: COLORS.outbound,
-          backgroundColor: COLORS.outbound + '33',
-          tension: 0.4,
-          fill: true
-        }
-      ]
+      datasets: METRICS.map(metric => ({
+        label: metric.plural,
+        data: rangeData.map(d => d[metric.key]),
+        borderColor: metric.color,
+        backgroundColor: metric.color + '33',
+        tension: 0.4,
+        fill: true
+      }))
     },
-    options: getLineChartOptions('Performance Over Time')
+    options: getLineChartOptions()
   });
 }
 
 function createIndividualTrendCharts() {
-  const metrics = ['reply', 'chat', 'inbound', 'outbound'];
-  const labels = { reply: 'Replies', chat: 'Chats', inbound: 'Inbound Calls', outbound: 'Outbound Calls' };
+  const rangeData = getRangeData(currentRange);
+  const chartLabels = rangeData.map(d => formatDate(d.date));
 
-  metrics.forEach(metric => {
-    const ctx = document.getElementById(`${metric}TrendChart`);
+  METRICS.forEach(metric => {
+    const ctx = document.getElementById(`${metric.key}TrendChart`);
     if (!ctx) return;
 
-    const rangeData = getRangeData(currentRange);
-    const chartLabels = rangeData.map(d => formatDate(d.date));
-    const data = rangeData.map(d => d[metric]);
-    const goal = currentData.goals[metric];
+    const goal = currentData.goals[metric.key];
 
-    destroyChart(`${metric}TrendChart`);
+    destroyChart(`${metric.key}TrendChart`);
 
     const datasets = [
       {
-        label: labels[metric],
-        data: data,
-        borderColor: COLORS[metric],
-        backgroundColor: COLORS[metric] + '33',
+        label: metric.plural,
+        data: rangeData.map(d => d[metric.key]),
+        borderColor: metric.color,
+        backgroundColor: metric.color + '33',
         tension: 0.4,
         fill: true,
         borderWidth: 3
       }
     ];
 
-    // Only add goal line for replies
-    if (metric === 'reply' && goal) {
+    if (goal) {
       datasets.push({
         label: 'Goal',
         data: Array(chartLabels.length).fill(goal),
@@ -397,13 +364,10 @@ function createIndividualTrendCharts() {
       });
     }
 
-    charts[`${metric}TrendChart`] = new Chart(ctx, {
+    charts[`${metric.key}TrendChart`] = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: chartLabels,
-        datasets: datasets
-      },
-      options: getLineChartOptions(labels[metric])
+      data: { labels: chartLabels, datasets },
+      options: getLineChartOptions()
     });
   });
 }
@@ -420,30 +384,9 @@ function createWeeklyComparisonChart() {
     type: 'bar',
     data: {
       labels: weeklyData.labels,
-      datasets: [
-        {
-          label: 'Replies',
-          data: weeklyData.reply,
-          backgroundColor: COLORS.reply
-        },
-        {
-          label: 'Chats',
-          data: weeklyData.chat,
-          backgroundColor: COLORS.chat
-        },
-        {
-          label: 'Inbound Calls',
-          data: weeklyData.inbound,
-          backgroundColor: COLORS.inbound
-        },
-        {
-          label: 'Outbound Calls',
-          data: weeklyData.outbound,
-          backgroundColor: COLORS.outbound
-        }
-      ]
+      datasets: metricDatasets(key => weeklyData[key])
     },
-    options: getBarChartOptions('Weekly Average Comparison')
+    options: getBarChartOptions()
   });
 }
 
@@ -483,14 +426,13 @@ function renderInsights() {
 }
 
 function renderComparisonTable() {
-  const metrics = ['Reply', 'Chat', 'Inbound', 'Outbound'];
   const today = currentData.metrics;
   const yesterday = getYesterdayData();
   const avg7Day = calculateAverage(getRangeData(7));
   const avg30Day = calculateAverage(getRangeData(30));
 
-  metrics.forEach(metric => {
-    const key = metric.toLowerCase();
+  METRIC_KEYS.forEach(key => {
+    const suffix = capitalize(key);
     const todayVal = today[key] || 0;
     const yesterdayVal = yesterday[key] || 0;
     const change = todayVal - yesterdayVal;
@@ -498,12 +440,12 @@ function renderComparisonTable() {
     const arrow = change > 0 ? '↑' : change < 0 ? '↓' : '→';
     const changeClass = change > 0 ? 'change-up' : change < 0 ? 'change-down' : '';
 
-    document.getElementById(`cmpToday${metric}`).textContent = todayVal;
-    document.getElementById(`cmpYesterday${metric}`).textContent = yesterdayVal;
-    document.getElementById(`cmp7Day${metric}`).textContent = avg7Day[key].toFixed(1);
-    document.getElementById(`cmp30Day${metric}`).textContent = avg30Day[key].toFixed(1);
+    document.getElementById(`cmpToday${suffix}`).textContent = todayVal;
+    document.getElementById(`cmpYesterday${suffix}`).textContent = yesterdayVal;
+    document.getElementById(`cmp7Day${suffix}`).textContent = avg7Day[key].toFixed(1);
+    document.getElementById(`cmp30Day${suffix}`).textContent = avg30Day[key].toFixed(1);
 
-    const changeEl = document.getElementById(`cmpChange${metric}`);
+    const changeEl = document.getElementById(`cmpChange${suffix}`);
     changeEl.innerHTML = `<span class="change-indicator ${changeClass}">${arrow} ${Math.abs(changePercent)}%</span>`;
   });
 }
@@ -521,39 +463,16 @@ function createStackedAreaChart() {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        {
-          label: 'Replies',
-          data: rangeData.map(d => d.reply),
-          backgroundColor: COLORS.reply + '99',
-          borderColor: COLORS.reply,
-          fill: true
-        },
-        {
-          label: 'Chats',
-          data: rangeData.map(d => d.chat),
-          backgroundColor: COLORS.chat + '99',
-          borderColor: COLORS.chat,
-          fill: true
-        },
-        {
-          label: 'Inbound Calls',
-          data: rangeData.map(d => d.inbound),
-          backgroundColor: COLORS.inbound + '99',
-          borderColor: COLORS.inbound,
-          fill: true
-        },
-        {
-          label: 'Outbound Calls',
-          data: rangeData.map(d => d.outbound),
-          backgroundColor: COLORS.outbound + '99',
-          borderColor: COLORS.outbound,
-          fill: true
-        }
-      ]
+      datasets: METRICS.map(metric => ({
+        label: metric.plural,
+        data: rangeData.map(d => d[metric.key]),
+        backgroundColor: metric.color + '99',
+        borderColor: metric.color,
+        fill: true
+      }))
     },
     options: {
-      ...getLineChartOptions('Activity Breakdown Over Time'),
+      ...getLineChartOptions(),
       scales: {
         y: {
           stacked: true,
@@ -648,30 +567,9 @@ function createDayOfWeekChart() {
     type: 'bar',
     data: {
       labels: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-      datasets: [
-        {
-          label: 'Replies',
-          data: dayData.reply,
-          backgroundColor: COLORS.reply
-        },
-        {
-          label: 'Chats',
-          data: dayData.chat,
-          backgroundColor: COLORS.chat
-        },
-        {
-          label: 'Inbound Calls',
-          data: dayData.inbound,
-          backgroundColor: COLORS.inbound
-        },
-        {
-          label: 'Outbound Calls',
-          data: dayData.outbound,
-          backgroundColor: COLORS.outbound
-        }
-      ]
+      datasets: metricDatasets(key => dayData[key])
     },
-    options: getBarChartOptions('Average Activity by Day of Week')
+    options: getBarChartOptions()
   });
 }
 
@@ -687,16 +585,16 @@ function createTodayVsGoalChart() {
   charts.todayChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: ['Replies', 'Chats', 'Inbound', 'Outbound'],
+      labels: METRICS.map(metric => metric.plural),
       datasets: [
         {
           label: 'Today',
-          data: [metrics.reply, metrics.chat, metrics.inbound, metrics.outbound],
-          backgroundColor: [COLORS.reply, COLORS.chat, COLORS.inbound, COLORS.outbound]
+          data: METRIC_KEYS.map(key => metrics[key]),
+          backgroundColor: METRICS.map(metric => metric.color)
         },
         {
           label: 'Goal',
-          data: [goals.reply, null, null, null],
+          data: METRIC_KEYS.map(key => goals[key]),
           backgroundColor: 'transparent',
           borderColor: '#ffffff',
           borderWidth: 2,
@@ -704,7 +602,7 @@ function createTodayVsGoalChart() {
         }
       ]
     },
-    options: getBarChartOptions('Today vs Goals')
+    options: getBarChartOptions()
   });
 }
 
@@ -713,17 +611,17 @@ function createDistributionChart() {
   if (!ctx) return;
 
   const { metrics } = currentData;
-  const total = metrics.reply + metrics.chat + metrics.inbound + metrics.outbound;
+  const total = metricsTotal(metrics);
 
   destroyChart('distributionChart');
 
   charts.distributionChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['Replies', 'Chats', 'Inbound', 'Outbound'],
+      labels: METRICS.map(metric => metric.plural),
       datasets: [{
-        data: [metrics.reply, metrics.chat, metrics.inbound, metrics.outbound],
-        backgroundColor: [COLORS.reply, COLORS.chat, COLORS.inbound, COLORS.outbound],
+        data: METRIC_KEYS.map(key => metrics[key]),
+        backgroundColor: METRICS.map(metric => metric.color),
         borderWidth: 2,
         borderColor: '#2d2d2d'
       }]
@@ -801,7 +699,7 @@ function setupChartDefaults() {
   Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 }
 
-function getLineChartOptions(title) {
+function getLineChartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: true,
@@ -839,7 +737,7 @@ function getLineChartOptions(title) {
   };
 }
 
-function getBarChartOptions(title) {
+function getBarChartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: true,
@@ -893,7 +791,7 @@ function getYesterdayData() {
   const yesterdayStr = yesterday.toISOString().split('T')[0];
 
   const data = currentData.history.find(d => d.date === yesterdayStr);
-  return data || { reply: 0, chat: 0, inbound: 0, outbound: 0 };
+  return data || createEmptyMetrics();
 }
 
 function getMonthData(year, month) {
@@ -908,72 +806,52 @@ function getMonthData(year, month) {
       const [y, m] = d.date.split('-').map(Number);
       return y === year && (m - 1) === month;
     })
-    .map(d => ({
-      date: d.date,
-      total: d.reply + d.chat + d.inbound + d.outbound
-    }));
+    .map(d => ({ date: d.date, total: metricsTotal(d) }));
+}
+
+/**
+ * Build a { reply: [...], chat: [...], call: [...] } object from a list of
+ * day buckets, averaging each metric within each bucket.
+ */
+function averagePerMetric(buckets) {
+  return Object.fromEntries(METRIC_KEYS.map(key => [
+    key,
+    buckets.map(bucket => average(bucket.map(day => day[key])))
+  ]));
 }
 
 function getWeeklyAverages() {
   const rangeData = getRangeData(currentRange);
-  const weeksCount = Math.ceil(rangeData.length / 7);
   const weeks = [];
 
-  for (let i = 0; i < weeksCount; i++) {
-    const weekData = rangeData.slice(i * 7, (i + 1) * 7);
-    if (weekData.length > 0) {
-      weeks.push({
-        label: `Week ${i + 1}`,
-        reply: average(weekData.map(d => d.reply)),
-        chat: average(weekData.map(d => d.chat)),
-        inbound: average(weekData.map(d => d.inbound)),
-        outbound: average(weekData.map(d => d.outbound))
-      });
-    }
+  for (let i = 0; i * 7 < rangeData.length; i++) {
+    weeks.push(rangeData.slice(i * 7, (i + 1) * 7));
   }
 
   return {
-    labels: weeks.map(w => w.label),
-    reply: weeks.map(w => w.reply),
-    chat: weeks.map(w => w.chat),
-    inbound: weeks.map(w => w.inbound),
-    outbound: weeks.map(w => w.outbound)
+    labels: weeks.map((_, i) => `Week ${i + 1}`),
+    ...averagePerMetric(weeks)
   };
 }
 
 function getDayOfWeekAverages() {
   const rangeData = getRangeData(90); // Use 90 days for better day-of-week analysis
-  const dayTotals = Array(7).fill(0).map(() => ({ reply: [], chat: [], inbound: [], outbound: [] }));
+  const byDayOfWeek = Array.from({ length: 7 }, () => []);
 
   rangeData.forEach(day => {
     // Parse date string as local time to avoid UTC timezone shift
     const [year, month, d] = day.date.split('-').map(Number);
-    const dayOfWeek = new Date(year, month - 1, d).getDay();
-    dayTotals[dayOfWeek].reply.push(day.reply);
-    dayTotals[dayOfWeek].chat.push(day.chat);
-    dayTotals[dayOfWeek].inbound.push(day.inbound);
-    dayTotals[dayOfWeek].outbound.push(day.outbound);
+    byDayOfWeek[new Date(year, month - 1, d).getDay()].push(day);
   });
 
-  return {
-    reply: dayTotals.map(d => average(d.reply)),
-    chat: dayTotals.map(d => average(d.chat)),
-    inbound: dayTotals.map(d => average(d.inbound)),
-    outbound: dayTotals.map(d => average(d.outbound))
-  };
+  return averagePerMetric(byDayOfWeek);
 }
 
 function calculateAverage(data) {
-  if (data.length === 0) {
-    return { reply: 0, chat: 0, inbound: 0, outbound: 0 };
-  }
-
-  return {
-    reply: average(data.map(d => d.reply)),
-    chat: average(data.map(d => d.chat)),
-    inbound: average(data.map(d => d.inbound)),
-    outbound: average(data.map(d => d.outbound))
-  };
+  return Object.fromEntries(METRIC_KEYS.map(key => [
+    key,
+    average(data.map(d => d[key]))
+  ]));
 }
 
 function findBestDay(data) {
@@ -981,12 +859,9 @@ function findBestDay(data) {
     return { date: '--', total: 0 };
   }
 
-  const withTotals = data.map(d => ({
-    date: d.date,
-    total: d.reply + d.chat + d.inbound + d.outbound
-  }));
-
-  return withTotals.reduce((best, current) => current.total > best.total ? current : best);
+  return data
+    .map(d => ({ date: d.date, total: metricsTotal(d) }))
+    .reduce((best, current) => current.total > best.total ? current : best);
 }
 
 function calculateGoalAchievementRate(data) {
@@ -1012,8 +887,8 @@ function calculateTrend(data) {
   const firstHalf = data.slice(0, halfPoint);
   const secondHalf = data.slice(halfPoint);
 
-  const firstAvg = average(firstHalf.map(d => d.reply + d.chat + d.inbound + d.outbound));
-  const secondAvg = average(secondHalf.map(d => d.reply + d.chat + d.inbound + d.outbound));
+  const firstAvg = average(firstHalf.map(metricsTotal));
+  const secondAvg = average(secondHalf.map(metricsTotal));
 
   const change = ((secondAvg - firstAvg) / firstAvg) * 100;
 
@@ -1027,12 +902,10 @@ function calculateTrend(data) {
 }
 
 function findTopMetric(data) {
-  const totals = {
-    Replies: data.reduce((sum, d) => sum + d.reply, 0),
-    Chats: data.reduce((sum, d) => sum + d.chat, 0),
-    'Inbound Calls': data.reduce((sum, d) => sum + d.inbound, 0),
-    'Outbound Calls': data.reduce((sum, d) => sum + d.outbound, 0)
-  };
+  const totals = Object.fromEntries(METRICS.map(metric => [
+    metric.plural,
+    data.reduce((sum, d) => sum + d[metric.key], 0)
+  ]));
 
   const grandTotal = Object.values(totals).reduce((sum, val) => sum + val, 0);
   const topMetric = Object.entries(totals).reduce((top, [name, total]) =>
@@ -1079,9 +952,15 @@ function changeDateRange(days) {
 }
 
 // ===== Settings =====
+function goalInputId(key) {
+  return `goal${capitalize(key)}Input`;
+}
+
 function openSettings() {
   const { goals } = currentData;
-  document.getElementById('goalReplyInput').value = goals.reply;
+  METRIC_KEYS.forEach(key => {
+    document.getElementById(goalInputId(key)).value = goals[key];
+  });
   document.getElementById('settingsModal').classList.add('active');
 }
 
@@ -1090,9 +969,12 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  const newGoals = {
-    reply: parseInt(document.getElementById('goalReplyInput').value)
-  };
+  const newGoals = normalizeGoals(
+    Object.fromEntries(METRIC_KEYS.map(key => [
+      key,
+      parseInt(document.getElementById(goalInputId(key)).value, 10)
+    ]))
+  );
 
   try {
     await StorageUtils.saveActiveGoals(newGoals);
@@ -1112,22 +994,16 @@ function exportData() {
     allData.push(currentData.metrics);
   }
 
-  let csv = 'Date,Replies,Chats,Inbound Calls,Outbound Calls,Total\n';
+  const rows = allData
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map(day => [day.date, ...METRIC_KEYS.map(key => day[key]), metricsTotal(day)]);
 
-  allData.sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(day => {
-    const total = day.reply + day.chat + day.inbound + day.outbound;
-    csv += `${day.date},${day.reply},${day.chat},${day.inbound},${day.outbound},${total}\n`;
-  });
+  const totals = METRIC_KEYS.map(key => allData.reduce((sum, d) => sum + d[key], 0));
+  const grandTotal = totals.reduce((sum, value) => sum + value, 0);
 
-  // Add summary
-  const totals = {
-    reply: allData.reduce((sum, d) => sum + d.reply, 0),
-    chat: allData.reduce((sum, d) => sum + d.chat, 0),
-    inbound: allData.reduce((sum, d) => sum + d.inbound, 0),
-    outbound: allData.reduce((sum, d) => sum + d.outbound, 0)
-  };
-  const grandTotal = totals.reply + totals.chat + totals.inbound + totals.outbound;
-  csv += `\nTOTAL,${totals.reply},${totals.chat},${totals.inbound},${totals.outbound},${grandTotal}`;
+  const header = ['Date', ...METRICS.map(metric => metric.plural), 'Total'];
+  let csv = [header, ...rows].map(row => row.join(',')).join('\n');
+  csv += `\n\nTOTAL,${totals.join(',')},${grandTotal}`;
 
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -1139,10 +1015,6 @@ function exportData() {
 }
 
 // ===== Utility Functions =====
-function getTodayDate() {
-  return new Date().toISOString().split('T')[0];
-}
-
 function formatDate(dateStr) {
   // Parse date string as local time to avoid UTC timezone shift
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -1153,8 +1025,4 @@ function formatDate(dateStr) {
 function average(arr) {
   if (arr.length === 0) return 0;
   return arr.reduce((sum, val) => sum + val, 0) / arr.length;
-}
-
-function isSameDay(date1, date2) {
-  return date1.toISOString().split('T')[0] === date2.toISOString().split('T')[0];
 }

@@ -124,7 +124,7 @@
 
     <!-- Scorecards Grid -->
     <div class="scorecards">
-      <div class="scorecard replies">
+      <div class="scorecard reply">
         <div class="scorecard-header">
           <span class="scorecard-icon">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -133,91 +133,53 @@
           </span>
           <span class="scorecard-label">Replies Sent</span>
         </div>
-        <div class="scorecard-value" id="repliesCount">0</div>
-        <div class="scorecard-breakdown" id="repliesBreakdown">
-          <div class="breakdown-item">
-            <span class="breakdown-label">📧 Email:</span>
-            <span class="breakdown-value" id="replyEmailCount">0</span>
-          </div>
-          <div class="breakdown-item">
-            <span class="breakdown-label">💬 SMS:</span>
-            <span class="breakdown-value" id="replySMSCount">0</span>
-          </div>
-          <div class="breakdown-item">
-            <span class="breakdown-label">💬 Chat:</span>
-            <span class="breakdown-value" id="replyChatCount">0</span>
-          </div>
-        </div>
+        <div class="scorecard-value" id="replyCount">0</div>
         <div class="scorecard-goal">
-          Goal: <span id="repliesGoal">20</span>
+          Goal: <span id="replyGoal">20</span>
         </div>
         <div class="scorecard-progress">
           <div class="progress-bar">
-            <div class="progress-fill" id="repliesProgress" style="width: 0%"></div>
+            <div class="progress-fill" id="replyProgress" style="width: 0%"></div>
           </div>
         </div>
       </div>
 
-      <div class="scorecard chats">
+      <div class="scorecard chat">
         <div class="scorecard-header">
           <span class="scorecard-icon">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <span class="scorecard-label">Chats Completed</span>
+          <span class="scorecard-label">Chats Handled</span>
         </div>
-        <div class="scorecard-value" id="chatsCount">0</div>
+        <div class="scorecard-value" id="chatCount">0</div>
         <div class="scorecard-goal">
-          Goal: <span id="chatsGoal">15</span>
+          Goal: <span id="chatGoal">15</span>
         </div>
         <div class="scorecard-progress">
           <div class="progress-bar">
-            <div class="progress-fill" id="chatsProgress" style="width: 0%"></div>
+            <div class="progress-fill" id="chatProgress" style="width: 0%"></div>
           </div>
         </div>
       </div>
 
-      <div class="scorecard inbound">
+      <div class="scorecard call">
         <div class="scorecard-header">
           <span class="scorecard-icon">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <polyline points="16 2 16 8 22 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <line x1="23" y1="1" x2="16" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <span class="scorecard-label">Inbound Calls</span>
+          <span class="scorecard-label">Calls</span>
         </div>
-        <div class="scorecard-value" id="inboundCount">0</div>
+        <div class="scorecard-value" id="callCount">0</div>
         <div class="scorecard-goal">
-          Goal: <span id="inboundGoal">10</span>
+          Goal: <span id="callGoal">10</span>
         </div>
         <div class="scorecard-progress">
           <div class="progress-bar">
-            <div class="progress-fill" id="inboundProgress" style="width: 0%"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="scorecard outbound">
-        <div class="scorecard-header">
-          <span class="scorecard-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <polyline points="16 8 16 2 22 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <line x1="23" y1="1" x2="16" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          <span class="scorecard-label">Outbound Calls</span>
-        </div>
-        <div class="scorecard-value" id="outboundCount">0</div>
-        <div class="scorecard-goal">
-          Goal: <span id="outboundGoal">5</span>
-        </div>
-        <div class="scorecard-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" id="outboundProgress" style="width: 0%"></div>
+            <div class="progress-fill" id="callProgress" style="width: 0%"></div>
           </div>
         </div>
       </div>
@@ -228,32 +190,25 @@
       <h2 class="section-title">Manual Tracking</h2>
       <p class="section-subtitle">Use these buttons to adjust counts</p>
       <div class="manual-buttons">
-        <div class="metric-control replies">
+        <div class="metric-control reply">
           <span class="metric-label">Reply</span>
           <div class="metric-buttons">
             <button class="subtract-btn" data-metric="reply" title="Subtract Reply">−</button>
             <button class="add-btn" data-metric="reply" title="Add Reply">+</button>
           </div>
         </div>
-        <div class="metric-control chats">
+        <div class="metric-control chat">
           <span class="metric-label">Chat</span>
           <div class="metric-buttons">
             <button class="subtract-btn" data-metric="chat" title="Subtract Chat">−</button>
             <button class="add-btn" data-metric="chat" title="Add Chat">+</button>
           </div>
         </div>
-        <div class="metric-control inbound">
-          <span class="metric-label">Inbound</span>
+        <div class="metric-control call">
+          <span class="metric-label">Call</span>
           <div class="metric-buttons">
-            <button class="subtract-btn" data-metric="inbound" title="Subtract Inbound">−</button>
-            <button class="add-btn" data-metric="inbound" title="Add Inbound">+</button>
-          </div>
-        </div>
-        <div class="metric-control outbound">
-          <span class="metric-label">Outbound</span>
-          <div class="metric-buttons">
-            <button class="subtract-btn" data-metric="outbound" title="Subtract Outbound">−</button>
-            <button class="add-btn" data-metric="outbound" title="Add Outbound">+</button>
+            <button class="subtract-btn" data-metric="call" title="Subtract Call">−</button>
+            <button class="add-btn" data-metric="call" title="Add Call">+</button>
           </div>
         </div>
       </div>
@@ -297,20 +252,16 @@
           <h3>Daily Goals</h3>
           <div class="settings-grid">
             <div class="setting-item">
-              <label for="goalReplies">Replies Goal</label>
-              <input type="number" id="goalReplies" min="0" max="100" value="20">
+              <label for="goalReply">Replies Goal</label>
+              <input type="number" id="goalReply" min="0" max="100" value="20">
             </div>
             <div class="setting-item">
-              <label for="goalChats">Chats Goal</label>
-              <input type="number" id="goalChats" min="0" max="100" value="15">
+              <label for="goalChat">Chats Goal</label>
+              <input type="number" id="goalChat" min="0" max="100" value="15">
             </div>
             <div class="setting-item">
-              <label for="goalInbound">Inbound Calls Goal</label>
-              <input type="number" id="goalInbound" min="0" max="100" value="10">
-            </div>
-            <div class="setting-item">
-              <label for="goalOutbound">Outbound Calls Goal</label>
-              <input type="number" id="goalOutbound" min="0" max="100" value="5">
+              <label for="goalCall">Calls Goal</label>
+              <input type="number" id="goalCall" min="0" max="100" value="10">
             </div>
           </div>
           <button class="save-settings-btn" id="saveSettings">Save Settings</button>
@@ -424,6 +375,7 @@
 
   <!-- Chart.js (bundled locally for CSP compliance) -->
   <script src="chart.min.js"></script>
+  <script src="metrics.js"></script>
   <script src="storage-utils.js"></script>
   <script src="popup.js"></script>
 </body>

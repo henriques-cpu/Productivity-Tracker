@@ -8,12 +8,16 @@
 // CONSTANTS & STATE
 // ============================================================================
 
-const DEFAULT_GOALS = {
-  reply: 20,
-  chat: 15,
-  inbound: 10,
-  outbound: 5,
-};
+const {
+  METRICS,
+  METRIC_KEYS,
+  DEFAULT_GOALS,
+  getTodayDateString,
+  createEmptyMetrics,
+  normalizeMetrics,
+  normalizeGoals,
+  normalizeHistory,
+} = Metrics;
 
 let chart = null;
 let currentMetrics = null;
@@ -30,27 +34,9 @@ const DEFAULT_REMINDER_SETTINGS = {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-function getTodayDateString() {
-  return new Date().toISOString().split('T')[0];
-}
-
 function calculateProgress(current, goal) {
   if (goal === 0) return 0;
   return Math.min((current / goal) * 100, 100);
-}
-
-function createEmptyMetrics() {
-  return {
-    date: getTodayDateString(),
-    reply: 0, // Keep for backwards compatibility and total count
-    replyEmail: 0,
-    replySMS: 0,
-    replyChat: 0,
-    chat: 0,
-    inbound: 0,
-    outbound: 0,
-    lastUpdated: Date.now(),
-  };
 }
 
 // ============================================================================
@@ -63,40 +49,29 @@ async function loadFromStorage() {
 
   if (!company) {
     console.error('[ZKT] No active company found');
-    return { metrics: createEmptyMetrics(), goals: DEFAULT_GOALS, history: [] };
+    return { metrics: createEmptyMetrics(), goals: { ...DEFAULT_GOALS }, history: [] };
   }
 
-  const metrics = company.data.metrics || createEmptyMetrics();
-  const storedGoals = company.data.goals || DEFAULT_GOALS;
-  const history = company.data.history || [];
+  const metrics = normalizeMetrics(company.data.metrics || createEmptyMetrics());
+  const storedGoals = normalizeGoals(company.data.goals);
+  const history = normalizeHistory(company.data.history);
 
-  // Check if it's a new day
-  if (metrics.date !== getTodayDateString()) {
-    // Archive old metrics and create new ones
-    if (metrics.date) {
-      history.push({
-        date: metrics.date,
-        reply: metrics.reply || 0,
-        replyEmail: metrics.replyEmail || 0,
-        replySMS: metrics.replySMS || 0,
-        replyChat: metrics.replyChat || 0,
-        chat: metrics.chat || 0,
-        inbound: metrics.inbound || 0,
-        outbound: metrics.outbound || 0,
-      });
-    }
-    const newMetrics = createEmptyMetrics();
-
-    // Update company data
-    await StorageUtils.updateCompany(company.id, {
-      metrics: newMetrics,
-      history: history.slice(-90)
-    });
-
-    return { metrics: newMetrics, goals: storedGoals, history };
-  } else {
+  // Same day: nothing to roll over
+  if (metrics.date === getTodayDateString()) {
     return { metrics, goals: storedGoals, history };
   }
+
+  // New day: archive yesterday's counts and start fresh
+  const { lastUpdated, ...archived } = metrics;
+  history.push(archived);
+
+  const newMetrics = createEmptyMetrics();
+  await StorageUtils.updateCompany(company.id, {
+    metrics: newMetrics,
+    history: history.slice(-90),
+  });
+
+  return { metrics: newMetrics, goals: storedGoals, history };
 }
 
 async function saveMetrics(metrics) {
@@ -216,31 +191,15 @@ async function updateConnectionStatus() {
 function updateScorecards(metrics) {
   if (!metrics) return;
 
-  updateScorecard('replies', metrics.reply || 0, goals.reply);
-  updateScorecard('chats', metrics.chat || 0, goals.chat);
-  updateScorecard('inbound', metrics.inbound || 0, goals.inbound);
-  updateScorecard('outbound', metrics.outbound || 0, goals.outbound);
-
-  // Update reply channel breakdown
-  updateChannelBreakdown(metrics);
-}
-
-function updateChannelBreakdown(metrics) {
-  const channels = ['Email', 'SMS', 'Chat'];
-
-  channels.forEach(channel => {
-    const key = `reply${channel}`;
-    const el = document.getElementById(`${key}Count`);
-    if (el) {
-      el.textContent = metrics[key] || 0;
-    }
+  METRIC_KEYS.forEach((key) => {
+    updateScorecard(key, metrics[key] || 0, goals[key]);
   });
 }
 
-function updateScorecard(type, count, goal) {
-  const countEl = document.getElementById(`${type}Count`);
-  const goalEl = document.getElementById(`${type}Goal`);
-  const progressEl = document.getElementById(`${type}Progress`);
+function updateScorecard(key, count, goal) {
+  const countEl = document.getElementById(`${key}Count`);
+  const goalEl = document.getElementById(`${key}Goal`);
+  const progressEl = document.getElementById(`${key}Progress`);
 
   if (countEl) {
     const oldCount = parseInt(countEl.textContent) || 0;
@@ -256,17 +215,14 @@ function updateScorecard(type, count, goal) {
   if (progressEl) progressEl.style.width = `${calculateProgress(count, goal)}%`;
 }
 
-function updateGoalInputs() {
-  const inputs = {
-    goalReplies: goals.reply,
-    goalChats: goals.chat,
-    goalInbound: goals.inbound,
-    goalOutbound: goals.outbound,
-  };
+function goalInputId(key) {
+  return `goal${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+}
 
-  Object.entries(inputs).forEach(([id, value]) => {
-    const el = document.getElementById(id);
-    if (el) el.value = value;
+function updateGoalInputs() {
+  METRIC_KEYS.forEach((key) => {
+    const el = document.getElementById(goalInputId(key));
+    if (el) el.value = goals[key];
   });
 }
 
@@ -283,25 +239,20 @@ function updateChart(metrics) {
   const ctx = canvas.getContext('2d');
 
   const data = {
-    labels: ['Replies', 'Chats', 'Inbound', 'Outbound'],
+    labels: METRICS.map((metric) => metric.plural),
     datasets: [
       {
         label: 'Today',
-        data: [metrics.reply || 0, metrics.chat || 0, metrics.inbound || 0, metrics.outbound || 0],
-        backgroundColor: [
-          'rgba(80, 70, 229, 0.8)',
-          'rgba(5, 150, 105, 0.8)',
-          'rgba(217, 119, 6, 0.8)',
-          'rgba(123, 31, 162, 0.8)',
-        ],
-        borderColor: ['#5046e5', '#059669', '#d97706', '#7b1fa2'],
+        data: METRIC_KEYS.map((key) => metrics[key] || 0),
+        backgroundColor: METRICS.map((metric) => `${metric.color}cc`),
+        borderColor: METRICS.map((metric) => metric.color),
         borderWidth: 1,
         borderRadius: 4,
         barPercentage: 0.6,
       },
       {
         label: 'Goal',
-        data: [goals.reply, goals.chat, goals.inbound, goals.outbound],
+        data: METRIC_KEYS.map((key) => goals[key]),
         backgroundColor: 'rgba(255, 255, 255, 0.1)',
         borderColor: 'rgba(255, 255, 255, 0.3)',
         borderWidth: 1,
@@ -376,38 +327,19 @@ async function exportToCSV() {
   }
   allData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const headers = ['Date', 'Replies (Total)', 'Email', 'SMS', 'Chat', 'Chats Completed', 'Inbound Calls', 'Outbound Calls', 'Total'];
-  const rows = allData.map((day) => {
-    const total = (day.reply || 0) + (day.chat || 0) + (day.inbound || 0) + (day.outbound || 0);
-    return [
-      day.date,
-      day.reply || 0,
-      day.replyEmail || 0,
-      day.replySMS || 0,
-      day.replyChat || 0,
-      day.chat || 0,
-      day.inbound || 0,
-      day.outbound || 0,
-      total
-    ];
-  });
+  const headers = ['Date', ...METRICS.map((metric) => metric.plural), 'Total'];
+  const rows = allData.map((day) => [
+    day.date,
+    ...METRIC_KEYS.map((key) => day[key] || 0),
+    Metrics.metricsTotal(day),
+  ]);
 
-  const totals = allData.reduce(
-    (acc, day) => ({
-      reply: acc.reply + (day.reply || 0),
-      replyEmail: acc.replyEmail + (day.replyEmail || 0),
-      replySMS: acc.replySMS + (day.replySMS || 0),
-      replyChat: acc.replyChat + (day.replyChat || 0),
-      chat: acc.chat + (day.chat || 0),
-      inbound: acc.inbound + (day.inbound || 0),
-      outbound: acc.outbound + (day.outbound || 0),
-    }),
-    { reply: 0, replyEmail: 0, replySMS: 0, replyChat: 0, chat: 0, inbound: 0, outbound: 0 }
+  const totals = METRIC_KEYS.map((key) =>
+    allData.reduce((sum, day) => sum + (day[key] || 0), 0)
   );
 
   rows.push([]);
-  rows.push(['TOTAL', totals.reply, totals.replyEmail, totals.replySMS, totals.replyChat, totals.chat, totals.inbound, totals.outbound,
-    totals.reply + totals.chat + totals.inbound + totals.outbound]);
+  rows.push(['TOTAL', ...totals, totals.reduce((sum, value) => sum + value, 0)]);
 
   const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
 
@@ -704,12 +636,12 @@ function closeSettings() {
 }
 
 async function handleSaveSettings() {
-  goals = {
-    reply: parseInt(document.getElementById('goalReplies')?.value) || DEFAULT_GOALS.reply,
-    chat: parseInt(document.getElementById('goalChats')?.value) || DEFAULT_GOALS.chat,
-    inbound: parseInt(document.getElementById('goalInbound')?.value) || DEFAULT_GOALS.inbound,
-    outbound: parseInt(document.getElementById('goalOutbound')?.value) || DEFAULT_GOALS.outbound,
-  };
+  goals = normalizeGoals(
+    Object.fromEntries(METRIC_KEYS.map((key) => [
+      key,
+      parseInt(document.getElementById(goalInputId(key))?.value, 10),
+    ]))
+  );
 
   await saveGoals(goals);
   updateScorecards(currentMetrics);
@@ -1045,8 +977,9 @@ async function init() {
   console.log('[ZKT] Initializing popup...');
 
   try {
-    // Migrate to multi-company structure if needed
+    // Migrate to multi-company structure and the current metric schema
     await StorageUtils.migrateToMultiCompany();
+    await StorageUtils.migrateMetricsSchema();
 
     // Load company selector
     await loadCompanySelector();
